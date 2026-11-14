@@ -79,6 +79,8 @@ Without any key the app still works: answers are the matching excerpts.
 | Anthropic | `ANTHROPIC_API_KEY` | Paid | `claude-sonnet-5-5` |
 | Any OpenAI-compatible API | `LLM_API_KEY` + `LLM_BASE_URL` | Varies | set `LLM_MODEL` |
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/yakov-ashgar27/yakov.LLM)
+
 On Windows you can double-click `run.bat` instead (it reads `.env`). To use Docker, run `docker build -t yakov-llm . && docker run -p 8000:8000 --env-file .env yakov-llm`. Render deploys `render.yaml` in one click.
 
 To index a different account, run:
