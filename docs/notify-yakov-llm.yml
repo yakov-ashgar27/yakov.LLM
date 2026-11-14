@@ -1,0 +1,21 @@
+# Optional: copy this file to .github/workflows/ in any of your projects.
+# Every push to that project then refreshes yakov.LLM within a minute,
+# instead of waiting for the 6-hourly schedule.
+#
+# Needs a secret YAKOV_LLM_TOKEN in the project: a fine-grained personal access
+# token with "Contents: read and write" on the yakov.LLM repository.
+name: Notify yakov.LLM
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${{ secrets.YAKOV_LLM_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository_owner }}/yakov.LLM/dispatches \
+            -d '{"event_type":"project-updated","client_payload":{"repo":"${{ github.repository }}"}}'

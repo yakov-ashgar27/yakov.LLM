@@ -1,0 +1,53 @@
+# Keeps yakov.LLM in step with GitHub: re-indexes new or changed projects,
+# commits the new knowledge base and republishes the demo on GitHub Pages.
+name: Refresh knowledge base
+on:
+  schedule:
+    - cron: "17 */6 * * *"          # every 6 hours
+  workflow_dispatch:                 # "Run workflow" button
+  repository_dispatch:
+    types: [project-updated]         # sent by a project's push (see docs/notify-yakov-llm.yml)
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Sync with GitHub (only changed repos are re-indexed)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python -m yakovllm.ingest --github "${{ github.repository_owner }}"
+      - name: Commit the new knowledge base
+        id: commit
+        run: |
+          if git diff --quiet -- data/kb.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"; echo "No project changed."
+          else
+            git config user.name "yakov.LLM bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/kb.json
+            git commit -m "Update knowledge base from GitHub"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build the static demo
+        run: python scripts/build_demo.py
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,19 @@
+[project]
+name = "yakovllm"
+version = "1.0.0"
+description = "yakov.LLM: an AI assistant that knows every project in a GitHub account and cites the exact lines"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Yakov Ashgar" }]
+dependencies = []  # standard library only
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+yakov-llm = "yakovllm.server:main"
+yakov-llm-ingest = "yakovllm.ingest:main"
+
+[tool.setuptools]
+packages = ["yakovllm"]

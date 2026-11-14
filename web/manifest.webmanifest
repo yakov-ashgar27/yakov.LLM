@@ -1,0 +1,12 @@
+{
+  "name": "yakov.LLM",
+  "short_name": "yakov.LLM",
+  "description": "AI assistant that knows Yakov Ashgar's GitHub projects",
+  "start_url": "./",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "he",
+  "background_color": "#fbfbfc",
+  "theme_color": "#b509ac",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
