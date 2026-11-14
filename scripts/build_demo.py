@@ -33,15 +33,21 @@ def main() -> None:
     html = re.sub(r'<script src="([\w.]+)"></script>', inline_js, html)
     icon = base64.b64encode((WEB / "icon.svg").read_bytes()).decode()
     html = html.replace('href="icon.svg"', f'href="data:image/svg+xml;base64,{icon}"')
-    html = html.replace('<link rel="manifest" href="manifest.webmanifest">\n', "")
-    if "--embedded" in sys.argv:
+    embedded = "--embedded" in sys.argv
+    if embedded:  # sandboxed host (an artifact): no manifest, no service worker, no live refresh
+        html = re.sub(r'\s*<link rel="manifest"[^>]*>|\s*<link rel="apple-touch-icon"[^>]*>', "", html)
         html = re.sub(r"kbUrl: '[^']*'", "kbUrl: ''", html)
+        html = html.replace("window.YAKOV_CONFIG = {", "window.YAKOV_EMBEDDED = true;\n    window.YAKOV_CONFIG = {", 1)
     kb_script = "<script>window.YAKOV_KB = " + kb.replace("</", "<\\/") + ";</script>\n"
     html = html.replace("</head>", kb_script + "</head>", 1)
 
     DIST.mkdir(exist_ok=True)
     (DIST / "index.html").write_text(html, encoding="utf-8")
     (DIST / "kb.json").write_text(kb, encoding="utf-8")
+    if not embedded:  # installable app (PWA) files
+        for name in ("manifest.webmanifest", "sw.js", "icon.svg", "icon-192.png", "icon-512.png",
+                     "icon-maskable-512.png", "apple-touch-icon.png"):
+            (DIST / name).write_bytes((WEB / name).read_bytes())
     print(f"dist/index.html · {len(html.encode()) / 1e6:.1f} MB")
 
 

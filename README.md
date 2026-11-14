@@ -4,7 +4,7 @@
 
 An AI assistant that knows every project in my GitHub account. Ask about the code, the design decisions or how to run something, and the answer cites the exact file and lines. When I add a project or push a change, it updates itself.
 
-**▶ Live demo:** https://yakov-ashgar27.github.io/yakov.LLM/ (search runs in the browser; written answers come from the hosted server)
+**▶ Live app:** https://yakov-ashgar27.github.io/yakov.LLM/ (installable on phone and desktop; search runs in the browser, written answers come from the hosted server)
 
 ![Home screen](docs/screenshot-home.png)
 

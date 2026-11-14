@@ -1,12 +1,21 @@
 {
+  "id": "./",
   "name": "yakov.LLM",
   "short_name": "yakov.LLM",
-  "description": "AI assistant that knows Yakov Ashgar's GitHub projects",
+  "description": "AI assistant that knows Yakov Ashgar's GitHub projects and cites the exact lines",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
+  "orientation": "any",
   "dir": "rtl",
   "lang": "he",
   "background_color": "#fbfbfc",
   "theme_color": "#b509ac",
-  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+  "categories": ["developer", "productivity", "education"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
 }

@@ -92,6 +92,9 @@ svg { flex: none; }
 .empty-history { color: var(--faint); font-size: 14px; padding: 10px 12px; }
 
 .side-foot { border-top: 1px solid var(--line); padding: 10px 12px 14px; display: grid; gap: 8px; }
+.install { color: var(--accent); font-weight: 550; }
+.install[hidden] { display: none; }
+@media (display-mode: standalone) { #install-how { display: none; } }
 .sync {
   display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
   border: 0; background: none; padding: 6px 8px; border-radius: var(--radius-s); text-align: start; width: 100%;

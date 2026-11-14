@@ -621,9 +621,28 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
     return BrowserBackend;
   }
 
+  // ---------------------------------------------------------------- installable app (PWA)
+  function setupInstall() {
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost') && !window.YAKOV_EMBEDDED) {
+      navigator.serviceWorker.register('sw.js').catch(() => { /* sandboxed host: no offline cache */ });
+    }
+    let deferred = null;
+    const btn = document.getElementById('install-btn');
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; btn.hidden = false; });
+    window.addEventListener('appinstalled', () => { btn.hidden = true; toast('yakov.LLM הותקן'); });
+    btn.addEventListener('click', async () => {
+      if (!deferred) return;
+      deferred.prompt();
+      await deferred.userChoice.catch(() => null);
+      deferred = null;
+      btn.hidden = true;
+    });
+  }
+
   window.YakovUI = UI;
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('[data-logo]').forEach((n) => (n.outerHTML = LOGO(+n.dataset.logo)));
+    setupInstall();
     UI.start().catch((e) => {
       document.getElementById('welcome').innerHTML = `<div class="error-box">yakov.LLM לא הצליח לטעון את מאגר הידע: ${esc(String(e && e.message || e))}</div>`;
     });
