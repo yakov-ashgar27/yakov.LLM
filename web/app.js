@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  const CFG = Object.assign({ ownerName: 'Yakov Ashgar', kbUrl: '' }, window.YAKOV_CONFIG || {});
+  const CFG = Object.assign({ ownerName: 'Yakov Ashgar', kbUrl: '', apiBase: '' }, window.YAKOV_CONFIG || {});
   const MD = window.YakovMarkdown;
   const $ = (sel, el = document) => el.querySelector(sel);
   const esc = MD.esc;
@@ -60,18 +60,20 @@
 
   const ServerBackend = {
     kind: 'server',
-    async init(health) { this.health = health; const r = await fetch('api/repos').then((x) => x.json()); this.repos = r.repos; this.builtAt = r.built_at; },
+    base: '',
+    url(path) { return this.base + path; },
+    async init(health, base = '') { this.base = base; this.health = health; const r = await fetch(this.url('api/repos')).then((x) => x.json()); this.repos = r.repos; this.builtAt = r.built_at; },
     status() {
       const h = this.health;
       return { live: h.mode === 'claude', modeLabel: h.mode === 'claude' ? 'Claude · ' + (h.model || '') : 'מצב לא מקוון', sync: h.sync, builtAt: h.built_at, chunks: h.chunks };
     },
-    async refresh() { this.health = await fetch('api/health').then((x) => x.json()); await this.init(this.health); },
+    async refresh() { this.health = await fetch(this.url('api/health')).then((x) => x.json()); await this.init(this.health, this.base); },
     async syncNow() {
-      const r = await fetch('api/sync', { method: 'POST' });
+      const r = await fetch(this.url('api/sync'), { method: 'POST' });
       if (!r.ok) throw new Error((await r.json()).error || 'sync failed');
     },
     async chat({ messages, repo, signal, onMeta, onDelta }) {
-      const res = await fetch('api/chat', {
+      const res = await fetch(this.url('api/chat'), {
         method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: messages.map(({ role, content }) => ({ role, content })), repo }),
       });
@@ -584,16 +586,37 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
   }
   window.YakovLogo = LOGO;
 
+  async function pingServer(base, ms) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), ms);
+    try {
+      const h = await fetch(base + 'api/health', { signal: ctl.signal }).then((r) => (r.ok ? r.json() : null));
+      return h && h.name === 'yakov.LLM' ? h : null;
+    } catch { return null; } finally { clearTimeout(t); }
+  }
+
   async function pickBackend() {
+    // 1. Served by the Python server itself.
     if (!window.YAKOV_KB && location.protocol.startsWith('http')) {
-      try {
-        const ctl = new AbortController();
-        setTimeout(() => ctl.abort(), 2500);
-        const h = await fetch('api/health', { signal: ctl.signal }).then((r) => (r.ok ? r.json() : null));
-        if (h && h.name === 'yakov.LLM') { await ServerBackend.init(h); return ServerBackend; }
-      } catch { /* no server: static demo */ }
+      const h = await pingServer('', 2500);
+      if (h) { await ServerBackend.init(h); return ServerBackend; }
     }
+    // 2. Static page: start searching in the browser right away...
     await BrowserBackend.init();
+    // 3. ...and switch to the hosted server (Claude answers) once it wakes up. A free host can take ~50 s.
+    if (CFG.apiBase) {
+      const base = CFG.apiBase.replace(/\/?$/, '/');
+      pingServer(base, 75000).then(async (h) => {
+        if (!h) return;
+        try {
+          await ServerBackend.init(h, base);
+          UI.backend = ServerBackend;
+          UI.renderProjects();
+          UI.updateStatus();
+          if (h.mode === 'claude') toast('Claude מחובר: התשובות יהיו כתובות');
+        } catch { /* stay in browser mode */ }
+      });
+    }
     return BrowserBackend;
   }
 

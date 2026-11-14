@@ -15,6 +15,8 @@ Environment:
     WEBHOOK_SECRET      secret of the GitHub webhook that triggers an instant sync
     SYNC_TOKEN          if set, POST /api/sync needs "Authorization: Bearer <token>"
     RATE_LIMIT          chat requests per IP per 10 minutes (default 30)
+    CORS_ORIGINS        sites whose pages may call this API, comma-separated
+                        (default https://yakov-ashgar27.github.io, the static demo)
     HOST / PORT         default 0.0.0.0:8000
 """
 from __future__ import annotations
@@ -41,6 +43,7 @@ WEB = ROOT / "web"
 KB_PATH = Path(os.environ.get("KB_PATH", ROOT / "data" / "kb.json"))
 OWNER_NAME = os.environ.get("OWNER_NAME", "Yakov Ashgar")
 STARTED = time.time()
+CORS_ORIGINS = {o.strip().rstrip("/") for o in os.environ.get("CORS_ORIGINS", "https://yakov-ashgar27.github.io").split(",") if o.strip()}
 
 
 class State:
@@ -111,9 +114,26 @@ class Handler(BaseHTTPRequestHandler):
         super().log_message(fmt, *args)
 
     # ---------------------------------------------------------------- utils
+    def _cors(self):
+        """Let the GitHub Pages demo call this API from the browser."""
+        origin = (self.headers.get("Origin") or "").rstrip("/")
+        if origin and (origin in CORS_ORIGINS or "*" in CORS_ORIGINS):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors()
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Max-Age", "86400")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _json(self, obj, status=200):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(status)
+        self._cors()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -228,6 +248,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "empty question"}, 400)
 
         self.send_response(HTTPStatus.OK)
+        self._cors()
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")

@@ -88,7 +88,7 @@ Settings are in [`.env.example`](.env.example).
 pip install pytest && python -m pytest -q
 ```
 
-There are 24 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against a fake Claude server that speaks the streaming protocol, webhook signatures, rate limiting, identical Python and JavaScript search results on every evaluation question, and a guard that fails CI if Hit@5 drops below 80%.
+There are 25 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against a fake Claude server that speaks the streaming protocol, webhook signatures, rate limiting, CORS for the static demo, identical Python and JavaScript search results on every evaluation question, and a guard that fails CI if Hit@5 drops below 80%.
 
 ## Design decisions
 

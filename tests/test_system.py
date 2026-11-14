@@ -224,3 +224,14 @@ def test_retrieval_quality_does_not_regress():
     qs = json.loads((ROOT / "eval" / "questions.json").read_text(encoding="utf-8"))
     r = evaluate(ix, qs)
     assert r["all"]["hit@5"] >= 0.80, r["all"]
+
+
+def test_cors_lets_the_static_demo_call_the_api(app):
+    _, url = app
+    allowed = urllib.request.Request(url + "/api/health", headers={"Origin": "https://yakov-ashgar27.github.io"})
+    assert urllib.request.urlopen(allowed).headers["Access-Control-Allow-Origin"] == "https://yakov-ashgar27.github.io"
+    other = urllib.request.Request(url + "/api/health", headers={"Origin": "https://evil.example"})
+    assert urllib.request.urlopen(other).headers["Access-Control-Allow-Origin"] is None
+    pre = urllib.request.Request(url + "/api/chat", method="OPTIONS", headers={"Origin": "https://yakov-ashgar27.github.io"})
+    r = urllib.request.urlopen(pre)
+    assert r.status == 204 and "POST" in r.headers["Access-Control-Allow-Methods"]
