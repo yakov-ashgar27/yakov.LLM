@@ -29,7 +29,20 @@
     return out + esc(code.slice(last));
   }
 
+  // Some models still emit LaTeX math ($\\le 5$). Turn the common symbols into plain characters.
+  const TEX = { le: '≤', leq: '≤', ge: '≥', geq: '≥', times: '×', to: '→', rightarrow: '→', leftarrow: '←', approx: '≈',
+    neq: '≠', ne: '≠', pm: '±', cdot: '·', deg: '°', circ: '°', infty: '∞', sim: '~', ldots: '…', dots: '…' };
+  function untex(s) {
+    return s.replace(/\$([^$\n]{1,80})\$/g, (whole, body) => {
+      if (!/\\[a-z]+|\^|_\{/.test(body)) return whole;            // a plain dollar amount, leave it
+      return body.replace(/\^\{?\\circ\}?/g, '°').replace(/\\(?:text|mathrm|mathbf)\{([^}]*)\}/g, '$1')
+        .replace(/\\([a-z]+)/g, (m, w) => TEX[w] || m)
+        .replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
+    });
+  }
+
   function inline(s, ctx) {
+    s = untex(s);
     // protect inline code first
     const codes = [];
     s = s.replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });

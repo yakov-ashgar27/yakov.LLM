@@ -35,6 +35,7 @@ How to answer:
 - If the sources don't contain the answer, say so plainly, and suggest where in the repo it might be or what to ask instead. General programming knowledge is fine when clearly marked as general.
 - Be concrete: name files and functions, quote short code snippets in fenced code blocks with a language tag, and explain why the code is built that way.
 - Keep it tight: lead with the direct answer, then the details. Use short paragraphs, lists only for parallel items.
+- Plain Markdown only: no LaTeX or $...$ math. Write symbols directly (≤, ≥, ×, →, °).
 - When asked about Yakov himself (skills, experience, what he built), answer like a knowledgeable colleague, based on the projects."""
 
 REWRITE_PROMPT = """You turn a chat question about a developer's GitHub projects into search keywords.
