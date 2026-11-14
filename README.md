@@ -24,9 +24,9 @@ flowchart LR
   SYNC --> CH[chunker.py<br/>code, docs, pages<br/>with line numbers]
   CH --> KB[(data/kb.json)]
   KB --> IDX[BM25 index<br/>search.py]
-  Q[Question] --> RW[Query rewrite<br/>Claude Haiku]
+  Q[Question] --> RW[Query rewrite<br/>fast model]
   RW --> IDX
-  IDX -->|top 6 excerpts| LLM[Claude<br/>answers with citations]
+  IDX -->|top 6 excerpts| LLM[LLM: Groq, Gemini or Claude<br/>answers with citations]
   LLM -->|streamed| UI[Chat UI]
 ```
 
@@ -58,7 +58,7 @@ Retrieval measured on [38 questions](eval/questions.json) (20 in Hebrew, 18 in E
 | BM25 (plain tokens) | 50% | 79% | 0.60 | 70% | 89% | 0.4 |
 | BM25 + Hebrew→English glossary | 53% | **87%** | **0.67** | **85%** | 89% | 0.6 |
 
-The glossary raised Hebrew recall from 70% to 85%. These numbers don't include the Claude keyword rewrite, which needs an API key at evaluation time. `python eval/run_eval.py` prints the table and lists the misses.
+The glossary raised Hebrew recall from 70% to 85%. These numbers don't include the model keyword rewrite, which needs an API key at evaluation time. `python eval/run_eval.py` prints the table and lists the misses.
 
 ## Run it
 
@@ -102,7 +102,7 @@ There are 26 tests. They cover the tokenizer, the chunker (line numbers must mat
 ## Design decisions
 
 - **BM25 instead of embeddings.** The corpus is small, about 600 chunks. Code questions use exact identifiers (`find_path_step`, `RBAC`), where keyword search is strong. BM25 runs in 1 ms with no model download, and it runs in the browser too. Cross-language recall, the usual weakness, is handled by the glossary and the query rewrite. The evaluation set is there to show when embeddings start to pay off.
-- **Standard library only.** The server, the Claude streaming client and the search engine have no dependencies, so the project runs anywhere and is easy to read end to end.
+- **Standard library only.** The server, the model streaming clients and the search engine have no dependencies, so the project runs anywhere and is easy to read end to end.
 - **One engine, two runtimes.** The JavaScript port lets the demo work as a single static file. A parity test keeps both runtimes in lockstep.
 - **Grounded answers.** The prompt requires a citation for every claim about the projects and an honest "not in the sources". The UI makes each citation one click away from the real lines.
 
