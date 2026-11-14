@@ -25,6 +25,8 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}   # always the latest main, also on re-runs
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Sync with GitHub (only changed repos are re-indexed)
@@ -41,7 +43,11 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add data/kb.json
             git commit -m "Update knowledge base from GitHub"
-            git push
+            # main may have moved while we were indexing: replay our commit on top, retry a few times
+            for i in 1 2 3; do
+              git pull --rebase -X theirs origin "${{ github.event.repository.default_branch }}" && git push && break
+              sleep 5
+            done
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Build the static demo
