@@ -4,7 +4,7 @@
 
 An AI assistant that knows every project in my GitHub account. Ask about the code, the design decisions or how to run something, and the answer cites the exact file and lines. When I add a project or push a change, it updates itself.
 
-**▶ Live demo:** https://yakov-ashgar27.github.io/yakov.LLM/ (search runs in the browser; written answers need the server below with a Claude API key)
+**▶ Live demo:** https://yakov-ashgar27.github.io/yakov.LLM/ (search runs in the browser; written answers come from the hosted server)
 
 ![Home screen](docs/screenshot-home.png)
 
@@ -32,7 +32,7 @@ flowchart LR
 
 1. **Ingest.** Every text file that helps answer questions (source code, Markdown, HTML pages, config) is split into chunks that keep their repo, path and line range. Markdown is split by headings, code into 60-line windows that prefer to end on a blank line, HTML pages into visible text. Each repo also gets an overview chunk with its summary, file types and folders.
 2. **Search.** A question is tokenized the same way and scored with BM25. Hebrew words are also mapped to the English words the code uses ("אויב" → `enemy`), because a Hebrew question about English code otherwise shares no words with it. With an API key, a fast model also suggests search keywords and probable function names.
-3. **Answer.** The six best excerpts go to Claude with the conversation. Claude must cite them as `[1]`, `[2]`. In the UI each citation opens the cited lines, highlighted, with a link to the same lines on GitHub.
+3. **Answer.** The six best excerpts go to the model with the conversation, and the model must cite them as `[1]`, `[2]`. The model is pluggable: Claude, or free options (open models on Groq, Gemini Flash), or any OpenAI-compatible endpoint. In the UI each citation opens the cited lines, highlighted, with a link to the same lines on GitHub.
 4. **Stay current.** See below.
 
 ![A citation opens the exact lines](docs/screenshot-source.png)
@@ -66,9 +66,18 @@ Python 3.10+ is all you need, with **no dependencies** to install.
 
 ```bash
 git clone https://github.com/yakov-ashgar27/yakov.LLM && cd yakov.LLM
-export ANTHROPIC_API_KEY=sk-ant-...      # optional: without it, answers are the matching excerpts
+export GROQ_API_KEY=gsk_...              # free written answers (or ANTHROPIC_API_KEY / GEMINI_API_KEY)
 python -m yakovllm                       # http://localhost:8000
 ```
+
+Without any key the app still works: answers are the matching excerpts.
+
+| Provider | Key | Cost | Default model |
+| --- | --- | --- | --- |
+| Groq | `GROQ_API_KEY` | Free tier, no card | `openai/gpt-oss-120b` |
+| Google Gemini | `GEMINI_API_KEY` | Free tier | `gemini-flash-latest` |
+| Anthropic | `ANTHROPIC_API_KEY` | Paid | `claude-sonnet-5-5` |
+| Any OpenAI-compatible API | `LLM_API_KEY` + `LLM_BASE_URL` | Varies | set `LLM_MODEL` |
 
 On Windows you can double-click `run.bat` instead (it reads `.env`). To use Docker, run `docker build -t yakov-llm . && docker run -p 8000:8000 --env-file .env yakov-llm`. Render deploys `render.yaml` in one click.
 
@@ -88,7 +97,7 @@ Settings are in [`.env.example`](.env.example).
 pip install pytest && python -m pytest -q
 ```
 
-There are 25 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against a fake Claude server that speaks the streaming protocol, webhook signatures, rate limiting, CORS for the static demo, identical Python and JavaScript search results on every evaluation question, and a guard that fails CI if Hit@5 drops below 80%.
+There are 26 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against fake Claude and OpenAI-compatible servers that speak their streaming protocols, webhook signatures, rate limiting, CORS for the static demo, identical Python and JavaScript search results on every evaluation question, and a guard that fails CI if Hit@5 drops below 80%.
 
 ## Design decisions
 
@@ -106,7 +115,7 @@ yakovllm/
   ingest.py       clone/read repos -> data/kb.json
   sync.py         incremental GitHub sync, live index swap
   search.py       BM25 index
-  llm.py          Claude streaming client, prompts, offline mode
+  llm.py          streaming clients (Claude, Groq, Gemini, OpenAI-compatible), prompts, offline mode
   server.py       HTTP server: UI, /api/chat (SSE), /api/search, /api/sync, webhook
 web/              chat UI (vanilla JS): app.js, engine.js, markdown.js, style.css
 eval/             questions.json, run_eval.py

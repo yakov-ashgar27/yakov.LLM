@@ -1,4 +1,11 @@
-"""Talking to Claude (streaming), plus an offline mode that needs no API key.
+"""Talking to a language model (streaming), plus an offline mode that needs no API key.
+
+Providers, picked by which key is set (or LLM_PROVIDER):
+    anthropic  ANTHROPIC_API_KEY   Claude (paid)
+    groq       GROQ_API_KEY        open models on Groq, free tier, no card needed
+    gemini     GEMINI_API_KEY      Google Gemini Flash, free tier
+    openai     LLM_API_KEY + LLM_BASE_URL   any OpenAI-compatible endpoint (OpenRouter, Ollama, ...)
+LLM_MODEL / LLM_FAST_MODEL override the default models.
 
 Only the standard library is used: the Messages API is a JSON POST, and its
 stream is Server-Sent Events, which we parse line by line.
@@ -36,24 +43,58 @@ keywords or identifiers likely to appear in the relevant files: English technica
 or file names, and the key Hebrew words. Resolve pronouns from the conversation."""
 
 
+PROVIDERS = {
+    "anthropic": {"label": "Claude", "key": "ANTHROPIC_API_KEY", "base": None,
+                  "model": "claude-sonnet-5-5", "fast": "claude-haiku-5-5", "max_source_chars": 4000},
+    "groq": {"label": "Groq", "key": "GROQ_API_KEY", "base": "https://api.groq.com/openai/v1",
+             "model": "openai/gpt-oss-120b", "fast": "openai/gpt-oss-20b", "max_source_chars": 1500},
+    "gemini": {"label": "Gemini", "key": "GEMINI_API_KEY", "base": "https://generativelanguage.googleapis.com/v1beta/openai",
+               "model": "gemini-flash-latest", "fast": "gemini-flash-lite-latest", "max_source_chars": 2500},
+    "openai": {"label": "LLM", "key": "LLM_API_KEY", "base": None,
+               "model": "gpt-4o-mini", "fast": None, "max_source_chars": 2000},
+}
+
+
+def provider() -> dict | None:
+    """The active provider with its settings, or None (offline mode)."""
+    name = os.environ.get("LLM_PROVIDER", "").lower()
+    order = [name] if name in PROVIDERS else ["anthropic", "groq", "gemini", "openai"]
+    for n in order:
+        p = PROVIDERS[n]
+        key = os.environ.get(p["key"], "")
+        if not key:
+            continue
+        base = os.environ.get("LLM_BASE_URL") if n == "openai" else p["base"]
+        if n == "openai" and not base:
+            continue
+        model = os.environ.get("LLM_MODEL") or (os.environ.get("YAKOV_MODEL") if n == "anthropic" else None) or p["model"]
+        fast = os.environ.get("LLM_FAST_MODEL") or (os.environ.get("YAKOV_FAST_MODEL") if n == "anthropic" else None) or p["fast"]
+        return {"name": n, "label": p["label"], "key": key, "base": (base or "").rstrip("/"), "model": model,
+                "fast": fast, "max_source_chars": int(os.environ.get("MAX_SOURCE_CHARS", p["max_source_chars"]))}
+    return None
+
+
 def model_name() -> str:
-    return os.environ.get("YAKOV_MODEL", "claude-sonnet-5-5")
+    p = provider()
+    return p["model"] if p else ""
 
 
 def fast_model_name() -> str:
-    return os.environ.get("YAKOV_FAST_MODEL", "claude-haiku-5-5")
+    p = provider()
+    return (p and p["fast"]) or ""
 
 
 def has_key() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return provider() is not None
 
 
-def format_sources(hits: list[dict]) -> str:
+def format_sources(hits: list[dict], max_chars: int = 4000) -> str:
     parts = []
     for h in hits:
+        text = h["text"] if len(h["text"]) <= max_chars else h["text"][:max_chars] + "\n…"
         parts.append(
             f'<source n="{h["n"]}" repo="{h["repo"]}" path="{h["path"]}" lines="{h["start"]}-{h["end"]}">\n'
-            f'{h["text"]}\n</source>'
+            f'{text}\n</source>'
         )
     return "\n\n".join(parts)
 
@@ -68,7 +109,8 @@ def build_messages(history: list[dict], hits: list[dict]) -> list[dict]:
     if not msgs:
         return []
     last = msgs[-1]["content"]
-    context = format_sources(hits) if hits else "(no matching excerpts were found)"
+    p = provider()
+    context = format_sources(hits, p["max_source_chars"] if p else 4000) if hits else "(no matching excerpts were found)"
     msgs[-1] = {"role": "user", "content": f"<sources>\n{context}\n</sources>\n\nQuestion: {last}"}
     return msgs
 
@@ -85,36 +127,69 @@ class ClaudeError(RuntimeError):
     pass
 
 
-def _post(payload: dict, stream: bool, timeout: float = 120):
-    req = urllib.request.Request(
-        API_URL,
-        data=json.dumps(payload).encode(),
-        headers={
-            "content-type": "application/json",
-            "x-api-key": os.environ.get("ANTHROPIC_API_KEY", ""),
-            "anthropic-version": API_VERSION,
-            **({"accept": "text/event-stream"} if stream else {}),
-        },
-        method="POST",
-    )
+def _post(payload: dict, stream: bool, timeout: float = 120, p: dict | None = None):
+    p = p or provider()
+    if p and p["name"] != "anthropic":
+        url = p["base"] + "/chat/completions"
+        headers = {"content-type": "application/json", "authorization": f'Bearer {p["key"]}'}
+    else:
+        url = API_URL
+        headers = {"content-type": "application/json", "x-api-key": os.environ.get("ANTHROPIC_API_KEY", ""),
+                   "anthropic-version": API_VERSION}
+    if stream:
+        headers["accept"] = "text/event-stream"
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method="POST")
     try:
         return urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
         try:
-            msg = json.loads(body)["error"]["message"]
+            err = json.loads(body)
+            err = err[0] if isinstance(err, list) else err
+            msg = err["error"]["message"]
         except Exception:
             msg = body[:300]
-        raise ClaudeError(f"Claude API {e.code}: {msg}") from None
+        if e.code == 429:
+            raise ClaudeError("המודל עמוס כרגע (מגבלת השימוש החינמי). נסה שוב בעוד דקה.") from None
+        raise ClaudeError(f'{p["label"] if p else "LLM"} API {e.code}: {msg}') from None
     except urllib.error.URLError as e:
-        raise ClaudeError(f"Cannot reach the Claude API: {e.reason}") from None
+        raise ClaudeError(f"Cannot reach the model API: {e.reason}") from None
+
+
+def stream_answer(system: str, messages: list[dict], max_tokens: int = 1800) -> Iterator[str]:
+    """Stream from whichever provider is active."""
+    p = provider()
+    if p["name"] == "anthropic":
+        yield from stream_claude(system, messages, max_tokens)
+        return
+    payload = {"model": p["model"], "stream": True, "max_tokens": max_tokens,
+               "messages": [{"role": "system", "content": system}] + messages}
+    if "gpt-oss" in p["model"]:
+        payload["reasoning_effort"] = "low"  # answers start sooner; retrieval did the hard part
+    with _post(payload, stream=True, p=p) as resp:
+        for raw in resp:
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                return
+            if not data:
+                continue
+            ev = json.loads(data)
+            if ev.get("error"):
+                raise ClaudeError(str(ev["error"].get("message", ev["error"])))
+            for ch in ev.get("choices") or []:
+                text = (ch.get("delta") or {}).get("content")
+                if text:
+                    yield text
 
 
 def stream_claude(system: str, messages: list[dict], max_tokens: int = 1800) -> Iterator[str]:
     """Yield text deltas from a streaming Messages API call."""
     payload = {"model": model_name(), "max_tokens": max_tokens, "system": system,
                "messages": messages, "stream": True}
-    with _post(payload, stream=True) as resp:
+    with _post(payload, stream=True, p=provider()) as resp:
         for raw in resp:
             line = raw.decode("utf-8", errors="replace").strip()
             if not line.startswith("data:"):
@@ -134,15 +209,26 @@ def stream_claude(system: str, messages: list[dict], max_tokens: int = 1800) -> 
 
 def rewrite_query(history: list[dict], question: str) -> list[str]:
     """Search keywords from a fast model; [] when unavailable (search still works)."""
-    if not has_key():
+    p = provider()
+    if not p or not p["fast"]:
         return []
     convo = "\n".join(f'{m["role"]}: {str(m["content"])[:400]}' for m in history[-4:-1])
-    payload = {"model": fast_model_name(), "max_tokens": 200, "system": REWRITE_PROMPT,
-               "messages": [{"role": "user", "content": f"Conversation so far:\n{convo or '(none)'}\n\nQuestion: {question}"}]}
+    user = f"Conversation so far:\n{convo or '(none)'}\n\nQuestion: {question}"
+    if p["name"] == "anthropic":
+        payload = {"model": p["fast"], "max_tokens": 200, "system": REWRITE_PROMPT,
+                   "messages": [{"role": "user", "content": user}]}
+    else:
+        payload = {"model": p["fast"], "max_tokens": 400,
+                   "messages": [{"role": "system", "content": REWRITE_PROMPT}, {"role": "user", "content": user}]}
+        if "gpt-oss" in p["fast"]:
+            payload["reasoning_effort"] = "low"
     try:
-        with _post(payload, stream=False, timeout=15) as resp:
+        with _post(payload, stream=False, timeout=15, p=p) as resp:
             data = json.load(resp)
-        text = "".join(b.get("text", "") for b in data.get("content", []))
+        if p["name"] == "anthropic":
+            text = "".join(b.get("text", "") for b in data.get("content", []))
+        else:
+            text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         m = re.search(r"\[.*\]", text, re.S)
         words = json.loads(m.group(0)) if m else []
         return [str(w)[:60] for w in words if isinstance(w, (str, int))][:12]
@@ -176,5 +262,5 @@ def offline_answer(question: str, hits: list[dict]) -> Iterator[str]:
         for i in range(0, len(piece), 60):  # stream it like a model would
             yield piece[i:i + 60]
             time.sleep(0.01)
-    yield ("כדי לקבל תשובות מנוסחות, הגדר `ANTHROPIC_API_KEY` והפעל מחדש את השרת."
-           if he else "Set `ANTHROPIC_API_KEY` and restart the server for written answers.")
+    yield ("כדי לקבל תשובות מנוסחות, הגדר `GROQ_API_KEY` (חינם) או `ANTHROPIC_API_KEY` והפעל מחדש את השרת."
+           if he else "Set `GROQ_API_KEY` (free) or `ANTHROPIC_API_KEY` and restart the server for written answers.")

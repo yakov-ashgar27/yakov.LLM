@@ -143,7 +143,7 @@ def app():
 def test_health_and_ui(app):
     _, url = app
     h = json.load(urllib.request.urlopen(url + "/api/health"))
-    assert h["name"] == "yakov.LLM" and h["mode"] == "claude" and h["chunks"] > 100
+    assert h["name"] == "yakov.LLM" and h["mode"] == "llm" and h["provider"] == "Claude" and h["chunks"] > 100
     html = urllib.request.urlopen(url + "/").read().decode()
     assert "yakov" in html and "app.js" in html
 
@@ -235,3 +235,52 @@ def test_cors_lets_the_static_demo_call_the_api(app):
     pre = urllib.request.Request(url + "/api/chat", method="OPTIONS", headers={"Origin": "https://yakov-ashgar27.github.io"})
     r = urllib.request.urlopen(pre)
     assert r.status == 204 and "POST" in r.headers["Access-Control-Allow-Methods"]
+
+
+class FakeOpenAI(BaseHTTPRequestHandler):
+    """An OpenAI-compatible endpoint (Groq, Gemini, OpenRouter...)."""
+    seen: list = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        FakeOpenAI.seen.append((self.path, self.headers["Authorization"], body))
+        if not body.get("stream"):
+            out = json.dumps({"choices": [{"message": {"content": '["bfs", "find_path_step"]'}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        for piece in ["BFS ", "[1]."]:
+            ev = {"choices": [{"delta": {"content": piece}}]}
+            self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
+        self.wfile.write(b"data: [DONE]\n\n")
+
+
+def test_free_provider_groq(monkeypatch):
+    from yakovllm import llm
+    srv, url = _serve(FakeOpenAI)
+    try:
+        for k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "LLM_PROVIDER"):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+        monkeypatch.setitem(llm.PROVIDERS["groq"], "base", url + "/openai/v1")
+        p = llm.provider()
+        assert p["name"] == "groq" and p["model"] == "openai/gpt-oss-120b"
+        assert llm.rewrite_query([], "how does the enemy chase?") == ["bfs", "find_path_step"]
+        hits = [{"n": 1, "repo": "r", "path": "a.py", "start": 1, "end": 2, "kind": "code", "text": "x" * 5000}]
+        out = "".join(llm.stream_answer("sys", llm.build_messages([{"role": "user", "content": "q"}], hits)))
+        assert out == "BFS [1]."
+        path, auth, body = FakeOpenAI.seen[-1]
+        assert path == "/openai/v1/chat/completions" and auth == "Bearer gsk_test"
+        assert body["messages"][0] == {"role": "system", "content": "sys"}
+        assert body["reasoning_effort"] == "low"
+        assert len(body["messages"][-1]["content"]) < 2000      # long sources are trimmed for free-tier token limits
+    finally:
+        srv.shutdown()

@@ -6,9 +6,10 @@ Standard library only (ThreadingHTTPServer), so it runs anywhere Python 3.10+
 runs, with no install step. Answers stream to the browser as Server-Sent Events.
 
 Environment:
-    ANTHROPIC_API_KEY   enables Claude answers (without it: offline excerpt mode)
-    YAKOV_MODEL         answer model            (default claude-sonnet-5-5)
-    YAKOV_FAST_MODEL    query-rewrite model     (default claude-haiku-5-5)
+    GROQ_API_KEY        free written answers (open models on Groq), or
+    GEMINI_API_KEY      free written answers (Gemini Flash), or
+    ANTHROPIC_API_KEY   Claude answers (paid). Without any key: offline excerpt mode.
+    LLM_MODEL           answer model (defaults per provider, see llm.PROVIDERS)
     GITHUB_USER         account to follow       (default: the owner in kb.json)
     GITHUB_TOKEN        optional, raises the GitHub API rate limit
     SYNC_INTERVAL_MIN   minutes between GitHub checks (default 30, 0 = off)
@@ -184,8 +185,9 @@ class Handler(BaseHTTPRequestHandler):
     def health(self) -> dict:
         ix = STATE.index
         sync = STATE.sync.status if STATE.sync else {"enabled": False}
-        return {"ok": True, "name": "yakov.LLM", "mode": "claude" if llm.has_key() else "offline",
-                "model": llm.model_name() if llm.has_key() else None,
+        prov = llm.provider()
+        return {"ok": True, "name": "yakov.LLM", "mode": "llm" if prov else "offline",
+                "provider": prov["label"] if prov else None, "model": prov["model"] if prov else None,
                 "owner": ix.kb.get("owner", ""), "owner_name": OWNER_NAME,
                 "repos": len(ix.repos), "chunks": ix.n, "built_at": ix.kb.get("built_at"),
                 "uptime_s": int(time.time() - STARTED), "sync": sync}
@@ -266,12 +268,12 @@ class Handler(BaseHTTPRequestHandler):
             keywords = llm.rewrite_query(messages, question)
             hits = ix.search(search_text, k=6, repo=repo, extra_terms=keywords)
             sources = source_payload(ix, hits)
-            send("meta", {"sources": sources, "keywords": keywords, "mode": "claude" if llm.has_key() else "offline",
+            send("meta", {"sources": sources, "keywords": keywords, "mode": "llm" if llm.has_key() else "offline",
                           "search_ms": round((time.perf_counter() - t0) * 1000, 1)})
             if llm.has_key():
                 system = llm.SYSTEM_PROMPT.format(owner_name=OWNER_NAME, owner=ix.kb.get("owner", ""),
                                                   projects=llm.project_list(ix.kb["repos"]))
-                stream = llm.stream_claude(system, llm.build_messages(messages, sources))
+                stream = llm.stream_answer(system, llm.build_messages(messages, sources))
             else:
                 stream = llm.offline_answer(question, sources)
             for piece in stream:
@@ -303,7 +305,7 @@ def main() -> None:
     httpd.daemon_threads = True
     ix = STATE.index
     print(f"yakov.LLM on http://localhost:{port} · {len(ix.repos)} repos · {ix.n} chunks · "
-          f"{'Claude ' + llm.model_name() if llm.has_key() else 'offline mode (set ANTHROPIC_API_KEY)'}", flush=True)
+          f"{(llm.provider()['label'] + ' ' + llm.model_name()) if llm.has_key() else 'offline mode (set GROQ_API_KEY or ANTHROPIC_API_KEY)'}", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

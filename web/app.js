@@ -65,7 +65,8 @@
     async init(health, base = '') { this.base = base; this.health = health; const r = await fetch(this.url('api/repos')).then((x) => x.json()); this.repos = r.repos; this.builtAt = r.built_at; },
     status() {
       const h = this.health;
-      return { live: h.mode === 'claude', modeLabel: h.mode === 'claude' ? 'Claude · ' + (h.model || '') : 'מצב לא מקוון', sync: h.sync, builtAt: h.built_at, chunks: h.chunks };
+      const live = h.mode !== 'offline';
+      return { live, modeLabel: live ? (h.provider || 'Claude') + ' · ' + (h.model || '').split('/').pop() : 'חיפוש בלבד', sync: h.sync, builtAt: h.built_at, chunks: h.chunks };
     },
     async refresh() { this.health = await fetch(this.url('api/health')).then((x) => x.json()); await this.init(this.health, this.base); },
     async syncNow() {
@@ -613,7 +614,7 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
           UI.backend = ServerBackend;
           UI.renderProjects();
           UI.updateStatus();
-          if (h.mode === 'claude') toast('Claude מחובר: התשובות יהיו כתובות');
+          if (h.mode !== 'offline') toast('המודל מחובר: התשובות יהיו כתובות');
         } catch { /* stay in browser mode */ }
       });
     }
