@@ -49,7 +49,7 @@ PROVIDERS = {
     "groq": {"label": "Groq", "key": "GROQ_API_KEY", "base": "https://api.groq.com/openai/v1",
              "model": "openai/gpt-oss-120b", "fast": "openai/gpt-oss-20b", "max_source_chars": 1500},
     "gemini": {"label": "Gemini", "key": "GEMINI_API_KEY", "base": "https://generativelanguage.googleapis.com/v1beta/openai",
-               "model": "gemini-flash-latest", "fast": "gemini-flash-lite-latest", "max_source_chars": 2500},
+               "model": "gemini-flash-latest", "fast": None, "max_source_chars": 2500},
     "openai": {"label": "LLM", "key": "LLM_API_KEY", "base": None,
                "model": "gpt-4o-mini", "fast": None, "max_source_chars": 2000},
 }
