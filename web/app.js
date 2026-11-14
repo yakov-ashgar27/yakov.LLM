@@ -137,7 +137,7 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
     },
     async refresh() {},
     async syncNow() { throw new Error('בגרסה הזו מאגר הידע מתעדכן אוטומטית על ידי GitHub Action.'); },
-    async chat({ messages, repo, signal, onMeta, onDelta }) {
+    async chat({ messages, repo, signal, onMeta, onDelta, onReplace }) {
       const users = messages.filter((m) => m.role === 'user');
       const q = users[users.length - 1].content;
       let searchText = q;
@@ -151,13 +151,11 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
         const history = messages.slice(-11, -1).filter((m) => m.content).map(({ role, content }) => ({ role, content: content.slice(0, 6000) }));
         while (history.length && history[0].role !== 'user') history.shift();
         const input = history.concat([{ role: 'user', content: `${BROWSER_SYSTEM(this.kb)}\n\n<sources>\n${ctx || '(no matching excerpts)'}\n</sources>\n\nQuestion: ${q}` }]);
-        let shown = '';
+        // sample() reports the WHOLE answer so far on every update, so we replace rather than append.
+        const show = (text) => { if (text && !/^Thinking\.*$/.test(text.trim())) onReplace(text); };
         try {
-          const res = await this.sample(input, {
-            signal, cache: false,
-            onText: ({ text }) => { if (text.startsWith(shown)) { onDelta(text.slice(shown.length)); shown = text; } },
-          });
-          if (res && res.text && res.text.length > shown.length && res.text.startsWith(shown)) onDelta(res.text.slice(shown.length));
+          const res = await this.sample(input, { signal, cache: false, onText: ({ text }) => show(text) });
+          if (res && res.text) show(res.text);
           return;
         } catch (e) {
           if (signal.aborted) return;
@@ -467,6 +465,7 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
           messages: history, repo: this.repo || null, signal: ctl.signal,
           onMeta: (meta) => { bm.sources = meta.sources; bm.meta = { sources: meta.sources.length, search_ms: meta.search_ms, mode: meta.mode }; paint(); },
           onDelta: (t) => { bm.content += t; if (!frame) frame = requestAnimationFrame(paint); },
+          onReplace: (t) => { bm.content = t; if (!frame) frame = requestAnimationFrame(paint); },
         });
         if (!bm.content) bm.content = '…';
       } catch (e) {

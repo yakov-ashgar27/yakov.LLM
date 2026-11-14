@@ -1,6 +1,7 @@
 """Build the static demo: ONE self-contained HTML file with the knowledge base inside.
 
     python scripts/build_demo.py            # -> dist/index.html (+ dist/kb.json)
+    python scripts/build_demo.py --embedded # no live refresh from GitHub (for sandboxed hosts)
 
 The demo needs no server. Search runs in the browser (web/engine.js); answers
 come from Claude when the page is opened inside Claude, otherwise the page shows
@@ -9,6 +10,7 @@ the best matching excerpts. GitHub Pages serves this file (see .github/workflows
 import base64
 import json
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +34,8 @@ def main() -> None:
     icon = base64.b64encode((WEB / "icon.svg").read_bytes()).decode()
     html = html.replace('href="icon.svg"', f'href="data:image/svg+xml;base64,{icon}"')
     html = html.replace('<link rel="manifest" href="manifest.webmanifest">\n', "")
+    if "--embedded" in sys.argv:
+        html = re.sub(r"kbUrl: '[^']*'", "kbUrl: ''", html)
     kb_script = "<script>window.YAKOV_KB = " + kb.replace("</", "<\\/") + ";</script>\n"
     html = html.replace("</head>", kb_script + "</head>", 1)
 
