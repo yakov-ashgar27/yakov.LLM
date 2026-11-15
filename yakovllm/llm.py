@@ -186,7 +186,8 @@ def stream_answer(system: str, messages: list[dict], max_tokens: int = 1800) -> 
             return
         except ClaudeError as e:
             # Only switch models before any text was sent (the generator raises on connect).
-            if e.status not in RETRYABLE or getattr(e, "streamed", False):
+            # 404 = this model name isn't available on the account: the next one may be.
+            if (e.status not in RETRYABLE and e.status != 404) or getattr(e, "streamed", False):
                 raise
             last = e
             time.sleep(0.8 * (i + 1))
