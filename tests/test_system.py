@@ -280,7 +280,37 @@ def test_free_provider_groq(monkeypatch):
         path, auth, body = FakeOpenAI.seen[-1]
         assert path == "/openai/v1/chat/completions" and auth == "Bearer gsk_test"
         assert body["messages"][0] == {"role": "system", "content": "sys"}
-        assert body["reasoning_effort"] == "low"
+        assert body["reasoning_effort"] == "low" and body["max_tokens"] >= 8000
         assert len(body["messages"][-1]["content"]) < 2000      # long sources are trimmed for free-tier token limits
+    finally:
+        srv.shutdown()
+
+
+class FakeThinkingOnly(BaseHTTPRequestHandler):
+    """A reasoning model that spends every token thinking and streams no text."""
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        self.wfile.write(b'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":"length"}]}\n\n')
+        self.wfile.write(b"data: [DONE]\n\n")
+
+
+def test_empty_answer_is_an_error_not_silence(monkeypatch):
+    from yakovllm import llm
+    srv, url = _serve(FakeThinkingOnly)
+    try:
+        for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "LLM_PROVIDER"):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv("GEMINI_API_KEY", "AIza_test")
+        monkeypatch.setitem(llm.PROVIDERS["gemini"], "base", url)
+        assert llm.provider()["reasoning"] == "low"
+        with pytest.raises(llm.ClaudeError, match="thinking"):
+            list(llm.stream_answer("sys", [{"role": "user", "content": "q"}]))
     finally:
         srv.shutdown()

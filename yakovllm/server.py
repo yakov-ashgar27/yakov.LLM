@@ -27,6 +27,7 @@ import hmac
 import json
 import mimetypes
 import os
+import queue
 import threading
 import time
 from collections import defaultdict, deque
@@ -276,8 +277,32 @@ class Handler(BaseHTTPRequestHandler):
                 stream = llm.stream_answer(system, llm.build_messages(messages, sources))
             else:
                 stream = llm.offline_answer(question, sources)
-            for piece in stream:
-                send("delta", {"text": piece})
+            # Run the model in a thread so we can send keep-alive comments while it thinks:
+            # some proxies close a stream that stays silent for too long.
+            q: queue.Queue = queue.Queue()
+
+            def pump() -> None:
+                try:
+                    for piece in stream:
+                        q.put(("delta", piece))
+                    q.put(("end", None))
+                except Exception as e:  # noqa: BLE001 - reported to the browser below
+                    q.put(("error", e))
+
+            threading.Thread(target=pump, daemon=True).start()
+            while True:
+                try:
+                    kind, val = q.get(timeout=8)
+                except queue.Empty:
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
+                    continue
+                if kind == "delta":
+                    send("delta", {"text": val})
+                elif kind == "error":
+                    raise val
+                else:
+                    break
             send("done", {"ms": round((time.perf_counter() - t0) * 1000)})
         except (BrokenPipeError, ConnectionResetError):
             return  # the user pressed stop

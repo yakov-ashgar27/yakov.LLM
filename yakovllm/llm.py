@@ -48,9 +48,12 @@ PROVIDERS = {
     "anthropic": {"label": "Claude", "key": "ANTHROPIC_API_KEY", "base": None,
                   "model": "claude-sonnet-5-5", "fast": "claude-haiku-5-5", "max_source_chars": 4000},
     "groq": {"label": "Groq", "key": "GROQ_API_KEY", "base": "https://api.groq.com/openai/v1",
-             "model": "openai/gpt-oss-120b", "fast": "openai/gpt-oss-20b", "max_source_chars": 1500},
+             "model": "openai/gpt-oss-120b", "fast": "openai/gpt-oss-20b", "max_source_chars": 1500, "reasoning": "low"},
     "gemini": {"label": "Gemini", "key": "GEMINI_API_KEY", "base": "https://generativelanguage.googleapis.com/v1beta/openai",
-               "model": "gemini-flash-latest", "fast": None, "max_source_chars": 2500},
+               "model": "gemini-flash-latest", "fast": None, "max_source_chars": 2500,
+               # Gemini 3 models think before answering, and thinking counts against max_tokens:
+               # keep it short so the answer starts quickly and is never starved of tokens.
+               "reasoning": "low"},
     "openai": {"label": "LLM", "key": "LLM_API_KEY", "base": None,
                "model": "gpt-4o-mini", "fast": None, "max_source_chars": 2000},
 }
@@ -71,6 +74,7 @@ def provider() -> dict | None:
         model = os.environ.get("LLM_MODEL") or (os.environ.get("YAKOV_MODEL") if n == "anthropic" else None) or p["model"]
         fast = os.environ.get("LLM_FAST_MODEL") or (os.environ.get("YAKOV_FAST_MODEL") if n == "anthropic" else None) or p["fast"]
         return {"name": n, "label": p["label"], "key": key, "base": (base or "").rstrip("/"), "model": model,
+                "reasoning": os.environ.get("LLM_REASONING", p.get("reasoning") or ""),
                 "fast": fast, "max_source_chars": int(os.environ.get("MAX_SOURCE_CHARS", p["max_source_chars"]))}
     return None
 
@@ -163,10 +167,13 @@ def stream_answer(system: str, messages: list[dict], max_tokens: int = 1800) -> 
     if p["name"] == "anthropic":
         yield from stream_claude(system, messages, max_tokens)
         return
-    payload = {"model": p["model"], "stream": True, "max_tokens": max_tokens,
+    # Reasoning models spend output tokens on thinking first, so leave plenty of room for the answer.
+    payload = {"model": p["model"], "stream": True, "max_tokens": max(max_tokens, 8000),
                "messages": [{"role": "system", "content": system}] + messages}
-    if "gpt-oss" in p["model"]:
-        payload["reasoning_effort"] = "low"  # answers start sooner; retrieval did the hard part
+    if p.get("reasoning"):
+        payload["reasoning_effort"] = p["reasoning"]  # answers start sooner; retrieval did the hard part
+    got_text = False
+    finish = None
     with _post(payload, stream=True, p=p) as resp:
         for raw in resp:
             line = raw.decode("utf-8", errors="replace").strip()
@@ -174,16 +181,23 @@ def stream_answer(system: str, messages: list[dict], max_tokens: int = 1800) -> 
                 continue
             data = line[5:].strip()
             if data == "[DONE]":
-                return
+                break
             if not data:
                 continue
             ev = json.loads(data)
+            if isinstance(ev, list):  # some gateways wrap errors in a list
+                ev = ev[0] if ev else {}
             if ev.get("error"):
                 raise ClaudeError(str(ev["error"].get("message", ev["error"])))
             for ch in ev.get("choices") or []:
                 text = (ch.get("delta") or {}).get("content")
                 if text:
+                    got_text = True
                     yield text
+                finish = ch.get("finish_reason") or finish
+    if not got_text:
+        reason = " (all tokens went to thinking)" if finish == "length" else ""
+        raise ClaudeError(f"המודל לא החזיר תשובה{reason}. נסה שוב, ואם זה חוזר, ייתכן שהמכסה החינמית להיום נגמרה.")
 
 
 def stream_claude(system: str, messages: list[dict], max_tokens: int = 1800) -> Iterator[str]:
@@ -221,8 +235,8 @@ def rewrite_query(history: list[dict], question: str) -> list[str]:
     else:
         payload = {"model": p["fast"], "max_tokens": 400,
                    "messages": [{"role": "system", "content": REWRITE_PROMPT}, {"role": "user", "content": user}]}
-        if "gpt-oss" in p["fast"]:
-            payload["reasoning_effort"] = "low"
+        if p.get("reasoning"):
+            payload["reasoning_effort"] = p["reasoning"]
     try:
         with _post(payload, stream=False, timeout=15, p=p) as resp:
             data = json.load(resp)

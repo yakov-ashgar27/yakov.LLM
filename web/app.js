@@ -470,7 +470,7 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
           onDelta: (t) => { bm.content += t; if (!frame) frame = requestAnimationFrame(paint); },
           onReplace: (t) => { bm.content = t; if (!frame) frame = requestAnimationFrame(paint); },
         });
-        if (!bm.content) bm.content = '…';
+        if (!bm.content && !ctl.signal.aborted) bm.error = 'המודל לא החזיר תשובה. נסה שוב בעוד רגע.';
       } catch (e) {
         if (!ctl.signal.aborted) bm.error = (e && e.message) || 'משהו השתבש.';
       } finally {
