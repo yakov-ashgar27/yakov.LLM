@@ -472,7 +472,12 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
         });
         if (!bm.content && !ctl.signal.aborted) bm.error = 'המודל לא החזיר תשובה. נסה שוב בעוד רגע.';
       } catch (e) {
-        if (!ctl.signal.aborted) bm.error = (e && e.message) || 'משהו השתבש.';
+        if (!ctl.signal.aborted) {
+          const msg = (e && e.message) || '';
+          bm.error = /network|failed to fetch|load failed|networkerror/i.test(msg)
+            ? 'החיבור לשרת נקטע באמצע (אולי הוא התעדכן או התעורר משינה). לחץ על ⟳ כדי לנסות שוב.'
+            : msg || 'משהו השתבש.';
+        }
       } finally {
         if (frame) cancelAnimationFrame(frame);
         if (ctl.signal.aborted && !bm.content) bm.content = '_(נעצר)_';
