@@ -314,3 +314,40 @@ def test_empty_answer_is_an_error_not_silence(monkeypatch):
             list(llm.stream_answer("sys", [{"role": "user", "content": "q"}]))
     finally:
         srv.shutdown()
+
+
+class FakeOverloaded(BaseHTTPRequestHandler):
+    """The main model answers 503 (overloaded); the fallback model works."""
+    models: list = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        FakeOverloaded.models.append(body["model"])
+        if body["model"] == "gemini-flash-latest":
+            out = json.dumps([{"error": {"code": 503, "message": "This model is currently experiencing high demand."}}]).encode()
+            self.send_response(503)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        self.wfile.write(b'data: {"choices":[{"delta":{"content":"ok [1]."}}]}\n\ndata: [DONE]\n\n')
+
+
+def test_overloaded_model_falls_back(monkeypatch):
+    from yakovllm import llm
+    srv, url = _serve(FakeOverloaded)
+    try:
+        for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "LLM_PROVIDER", "LLM_FALLBACK_MODELS"):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv("GEMINI_API_KEY", "AIza_test")
+        monkeypatch.setitem(llm.PROVIDERS["gemini"], "base", url)
+        assert "".join(llm.stream_answer("sys", [{"role": "user", "content": "q"}])) == "ok [1]."
+        assert FakeOverloaded.models == ["gemini-flash-latest", "gemini-flash-lite-latest"]
+    finally:
+        srv.shutdown()

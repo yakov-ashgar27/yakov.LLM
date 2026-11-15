@@ -48,12 +48,15 @@ PROVIDERS = {
     "anthropic": {"label": "Claude", "key": "ANTHROPIC_API_KEY", "base": None,
                   "model": "claude-sonnet-5-5", "fast": "claude-haiku-5-5", "max_source_chars": 4000},
     "groq": {"label": "Groq", "key": "GROQ_API_KEY", "base": "https://api.groq.com/openai/v1",
-             "model": "openai/gpt-oss-120b", "fast": "openai/gpt-oss-20b", "max_source_chars": 1500, "reasoning": "low"},
+             "model": "openai/gpt-oss-120b", "fast": "openai/gpt-oss-20b", "max_source_chars": 1500, "reasoning": "low",
+             "fallbacks": ["openai/gpt-oss-20b"]},
     "gemini": {"label": "Gemini", "key": "GEMINI_API_KEY", "base": "https://generativelanguage.googleapis.com/v1beta/openai",
                "model": "gemini-flash-latest", "fast": None, "max_source_chars": 2500,
                # Gemini 3 models think before answering, and thinking counts against max_tokens:
                # keep it short so the answer starts quickly and is never starved of tokens.
-               "reasoning": "low"},
+               "reasoning": "low",
+               # Free-tier models are sometimes overloaded (HTTP 503): fall back to these, in order.
+               "fallbacks": ["gemini-flash-lite-latest", "gemini-2.5-flash"]},
     "openai": {"label": "LLM", "key": "LLM_API_KEY", "base": None,
                "model": "gpt-4o-mini", "fast": None, "max_source_chars": 2000},
 }
@@ -75,6 +78,7 @@ def provider() -> dict | None:
         fast = os.environ.get("LLM_FAST_MODEL") or (os.environ.get("YAKOV_FAST_MODEL") if n == "anthropic" else None) or p["fast"]
         return {"name": n, "label": p["label"], "key": key, "base": (base or "").rstrip("/"), "model": model,
                 "reasoning": os.environ.get("LLM_REASONING", p.get("reasoning") or ""),
+                "fallbacks": [m for m in os.environ.get("LLM_FALLBACK_MODELS", ",".join(p.get("fallbacks", []))).split(",") if m.strip()],
                 "fast": fast, "max_source_chars": int(os.environ.get("MAX_SOURCE_CHARS", p["max_source_chars"]))}
     return None
 
@@ -129,7 +133,12 @@ def project_list(repos: list[dict]) -> str:
 
 
 class ClaudeError(RuntimeError):
-    pass
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+RETRYABLE = {429, 500, 502, 503, 504}
 
 
 def _post(payload: dict, stream: bool, timeout: float = 120, p: dict | None = None):
@@ -155,8 +164,10 @@ def _post(payload: dict, stream: bool, timeout: float = 120, p: dict | None = No
         except Exception:
             msg = body[:300]
         if e.code == 429:
-            raise ClaudeError("המודל עמוס כרגע (מגבלת השימוש החינמי). נסה שוב בעוד דקה.") from None
-        raise ClaudeError(f'{p["label"] if p else "LLM"} API {e.code}: {msg}') from None
+            raise ClaudeError("המכסה החינמית של המודל נוצלה לרגע. נסה שוב בעוד דקה.", 429) from None
+        if e.code in (500, 502, 503, 504):
+            raise ClaudeError("המודל עמוס כרגע אצל הספק. נסה שוב בעוד דקה.", e.code) from None
+        raise ClaudeError(f'{p["label"] if p else "LLM"} API {e.code}: {msg}', e.code) from None
     except urllib.error.URLError as e:
         raise ClaudeError(f"Cannot reach the model API: {e.reason}") from None
 
@@ -167,14 +178,34 @@ def stream_answer(system: str, messages: list[dict], max_tokens: int = 1800) -> 
     if p["name"] == "anthropic":
         yield from stream_claude(system, messages, max_tokens)
         return
+    models = [p["model"]] + [m for m in p.get("fallbacks", []) if m != p["model"]]
+    last: ClaudeError | None = None
+    for i, model in enumerate(models):
+        try:
+            yield from _stream_openai(p, model, system, messages, max_tokens)
+            return
+        except ClaudeError as e:
+            # Only switch models before any text was sent (the generator raises on connect).
+            if e.status not in RETRYABLE or getattr(e, "streamed", False):
+                raise
+            last = e
+            time.sleep(0.8 * (i + 1))
+    raise last or ClaudeError("המודל לא זמין כרגע.")
+
+
+def _stream_openai(p: dict, model: str, system: str, messages: list[dict], max_tokens: int) -> Iterator[str]:
     # Reasoning models spend output tokens on thinking first, so leave plenty of room for the answer.
-    payload = {"model": p["model"], "stream": True, "max_tokens": max(max_tokens, 8000),
+    payload = {"model": model, "stream": True, "max_tokens": max(max_tokens, 8000),
                "messages": [{"role": "system", "content": system}] + messages}
     if p.get("reasoning"):
         payload["reasoning_effort"] = p["reasoning"]  # answers start sooner; retrieval did the hard part
     got_text = False
     finish = None
-    with _post(payload, stream=True, p=p) as resp:
+    try:
+        resp = _post(payload, stream=True, p=p)
+    except ClaudeError:
+        raise
+    with resp:
         for raw in resp:
             line = raw.decode("utf-8", errors="replace").strip()
             if not line.startswith("data:"):
@@ -188,7 +219,11 @@ def stream_answer(system: str, messages: list[dict], max_tokens: int = 1800) -> 
             if isinstance(ev, list):  # some gateways wrap errors in a list
                 ev = ev[0] if ev else {}
             if ev.get("error"):
-                raise ClaudeError(str(ev["error"].get("message", ev["error"])))
+                err = ev["error"]
+                code = err.get("code") if isinstance(err.get("code"), int) else None
+                e = ClaudeError(str(err.get("message", err)), code)
+                e.streamed = got_text
+                raise e
             for ch in ev.get("choices") or []:
                 text = (ch.get("delta") or {}).get("content")
                 if text:
