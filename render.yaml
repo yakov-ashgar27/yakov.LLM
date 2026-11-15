@@ -7,6 +7,14 @@ services:
     runtime: docker
     plan: free
     healthCheckPath: /api/health
+    # Redeploy on every push that changes the app. Knowledge-base commits from the
+    # refresh Action don't need a redeploy: the running server syncs with GitHub itself.
+    autoDeployTrigger: commit
+    buildFilter:
+      paths:
+        - yakovllm/**
+        - web/**
+        - Dockerfile
     envVars:
       - key: GEMINI_API_KEY
         sync: false
