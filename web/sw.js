@@ -1,6 +1,6 @@
 /* yakov.LLM service worker: the app opens instantly and works offline (search runs in the page).
  * Pages and the knowledge base: network first, cache as fallback. API calls: never cached. */
-const CACHE = 'yakovllm-v1';
+const CACHE = 'yakovllm-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
