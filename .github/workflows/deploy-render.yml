@@ -1,0 +1,24 @@
+# Redeploys the server on Render whenever the app code changes.
+# Uses Render's deploy hook, stored as the repository secret RENDER_DEPLOY_HOOK
+# (Render dashboard -> yakov-llm -> Settings -> Deploy Hook). Without it, does nothing.
+name: Deploy to Render
+on:
+  push:
+    branches: [main]
+    paths: ["yakovllm/**", "web/**", "Dockerfile"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "RENDER_DEPLOY_HOOK is not set; skipping." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" > /dev/null
+          echo "Render deploy triggered." >> "$GITHUB_STEP_SUMMARY"
