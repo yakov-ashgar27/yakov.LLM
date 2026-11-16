@@ -49,6 +49,8 @@ class GitHubSync:
         try:
             listed = ingest.list_user_repos_meta(self.user)
             kb = self._load()
+            if kb.get("version") != ingest.KB_VERSION:
+                force = True  # the knowledge base format changed: rebuild every repo once
             repos = {r["key"]: r for r in kb["repos"]}
             chunks_by_repo: dict[str, list[dict]] = {}
             for c in kb["chunks"]:

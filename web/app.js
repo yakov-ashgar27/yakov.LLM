@@ -460,6 +460,12 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
 
       const ctl = new AbortController();
       this.streaming = ctl;
+      // Watchdog: if no text arrives for 110 s (the server tries up to three models), stop waiting.
+      let lastText = Date.now();
+      let timedOut = false;
+      const watchdog = setInterval(() => {
+        if (Date.now() - lastText > 110000) { timedOut = true; ctl.abort(); }
+      }, 2000);
       this.setSending(true);
       let frame = 0;
       const paint = () => { frame = 0; this.fillBot(el, bm, true); this.scrollDown(); };
@@ -467,8 +473,8 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
         await this.backend.chat({
           messages: history, repo: this.repo || null, signal: ctl.signal,
           onMeta: (meta) => { bm.sources = meta.sources; bm.meta = { sources: meta.sources.length, search_ms: meta.search_ms, mode: meta.mode }; paint(); },
-          onDelta: (t) => { bm.content += t; if (!frame) frame = requestAnimationFrame(paint); },
-          onReplace: (t) => { bm.content = t; if (!frame) frame = requestAnimationFrame(paint); },
+          onDelta: (t) => { lastText = Date.now(); bm.content += t; if (!frame) frame = requestAnimationFrame(paint); },
+          onReplace: (t) => { lastText = Date.now(); bm.content = t; if (!frame) frame = requestAnimationFrame(paint); },
         });
         if (!bm.content && !ctl.signal.aborted) bm.error = 'המודל לא החזיר תשובה. נסה שוב בעוד רגע.';
       } catch (e) {
@@ -479,8 +485,10 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
             : msg || 'משהו השתבש.';
         }
       } finally {
+        clearInterval(watchdog);
+        if (timedOut && !bm.content) bm.error = 'המודל לא הגיב בזמן (אולי השרת התעורר משינה או שהמודל החינמי עמוס). לחץ על ⟳ כדי לנסות שוב.';
         if (frame) cancelAnimationFrame(frame);
-        if (ctl.signal.aborted && !bm.content) bm.content = '_(נעצר)_';
+        if (ctl.signal.aborted && !bm.content && !bm.error) bm.content = '_(נעצר)_';
         this.streaming = null;
         this.setSending(false);
         this.fillBot(el, bm, false);

@@ -351,3 +351,47 @@ def test_overloaded_model_falls_back(monkeypatch):
         assert FakeOverloaded.models == ["gemini-flash-latest", "gemini-flash-lite-latest"]
     finally:
         srv.shutdown()
+
+
+class FakeSilent(BaseHTTPRequestHandler):
+    """The main model accepts the request and then says nothing; the fallback answers."""
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        self.wfile.flush()
+        if body["model"] == "gemini-flash-latest":
+            time.sleep(3)
+            return
+        self.wfile.write(b'data: {"choices":[{"delta":{"content":"fallback"}}]}\n\ndata: [DONE]\n\n')
+
+
+def test_silent_model_times_out_and_falls_back(monkeypatch):
+    from yakovllm import llm
+    srv, url = _serve(FakeSilent)
+    try:
+        for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "LLM_PROVIDER", "LLM_FALLBACK_MODELS"):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv("GEMINI_API_KEY", "AIza_test")
+        monkeypatch.setitem(llm.PROVIDERS["gemini"], "base", url)
+        monkeypatch.setattr(llm, "FIRST_TOKEN_TIMEOUT", 1.0)
+        assert "".join(llm.stream_answer("sys", [{"role": "user", "content": "q"}])) == "fallback"
+    finally:
+        srv.shutdown()
+
+
+def test_ignore_file_and_line_counts(tmp_path):
+    repo = tmp_path / "proj"
+    _git_repo(repo, {"README.md": "# Proj\n\nProj is a small project used to test ignore files and line counting.\n",
+                     "app.py": "a = 1\n\nb = 2\nc = 3\n" * 10, "web/index.html": "<p>" + "sample question " * 20 + "</p>\n",
+                     ".yakovllm-ignore": "# skip the UI\nweb/index.html\n"})
+    meta, chunks = ingest.ingest_repo(repo, "proj")
+    assert not any(c["path"] == "web/index.html" for c in chunks)
+    assert meta["loc"]["py"] == 30
+    overview = chunks[0]
+    assert overview["path"] == "(overview)" and "שורות קוד" in overview["text"] and "py: 30" in overview["text"]

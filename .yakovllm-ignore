@@ -1,0 +1,10 @@
+# Files yakov.LLM skips when it indexes its own repository.
+# They hold sample questions, prompts and the Hebrew glossary, so they would
+# match almost any question and crowd out the real answers in other projects.
+web/index.html
+web/app.js
+yakovllm/tokenizer.py
+yakovllm/llm.py
+eval/*
+tests/*
+docs/notify-yakov-llm.yml

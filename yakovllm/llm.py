@@ -139,6 +139,7 @@ class ClaudeError(RuntimeError):
 
 
 RETRYABLE = {429, 500, 502, 503, 504}
+FIRST_TOKEN_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "30"))  # seconds of silence before giving up on a model
 
 
 def _post(payload: dict, stream: bool, timeout: float = 120, p: dict | None = None):
@@ -202,12 +203,19 @@ def _stream_openai(p: dict, model: str, system: str, messages: list[dict], max_t
         payload["reasoning_effort"] = p["reasoning"]  # answers start sooner; retrieval did the hard part
     got_text = False
     finish = None
-    try:
-        resp = _post(payload, stream=True, p=p)
-    except ClaudeError:
-        raise
+    # A stuck stream fails after FIRST_TOKEN_TIMEOUT seconds of silence, so the next model can try.
+    resp = _post(payload, stream=True, p=p, timeout=FIRST_TOKEN_TIMEOUT)
     with resp:
-        for raw in resp:
+        lines = iter(resp)
+        while True:
+            try:
+                raw = next(lines)
+            except StopIteration:
+                break
+            except (TimeoutError, OSError) as e:
+                err = ClaudeError("המודל לא הגיב בזמן. נסה שוב בעוד רגע.", 504)
+                err.streamed = got_text
+                raise err from e
             line = raw.decode("utf-8", errors="replace").strip()
             if not line.startswith("data:"):
                 continue

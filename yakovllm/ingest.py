@@ -12,6 +12,7 @@ build output, binaries and anything over 200 KB are skipped.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -36,6 +37,9 @@ SKIP_DIRS = {".git", "node_modules", "dist", "build", ".venv", "venv", "__pycach
 SKIP_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"}
 JSON_KEEP = {"package.json", "manifest.webmanifest", "tsconfig.json"}
 MAX_BYTES = 200_000
+KB_VERSION = 2          # bump when chunks or metadata change shape: forces a full re-index
+IGNORE_FILE = ".yakovllm-ignore"  # optional, in a repo's root: glob patterns of files to skip
+CODE_EXT = {".py", ".pyw", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".html", ".htm", ".css", ".sql", ".sh", ".bat"}
 
 
 def log(msg: str) -> None:
@@ -145,6 +149,9 @@ def overview_chunk(meta: dict, files: dict[str, str]) -> dict:
         f"GitHub: {meta['url']}" if meta["url"] else "",
         f"Homepage / live: {meta['homepage']}" if meta.get("homepage") else "",
         f"Files indexed: {meta['files']}. File types: {langs}.",
+        (f"Lines of code / שורות קוד: {sum(meta['loc'].values()):,} non-empty lines in total ("
+         + ", ".join(f"{k}: {v:,}" for k, v in meta["loc"].items()) + "). גודל הפרויקט, כמה שורות קוד יש בו."
+         if meta.get("loc") else ""),
         f"Top-level folders and files: {', '.join(top[:40])}",
         f"Last commit: {meta.get('committed_at', '')[:10]} ({meta.get('commit', '')})",
     ]
@@ -153,14 +160,43 @@ def overview_chunk(meta: dict, files: dict[str, str]) -> dict:
             "title": f"{meta['title']} › overview", "kind": "overview", "text": text}
 
 
+def ignore_patterns(path: Path) -> list[str]:
+    f = path / IGNORE_FILE
+    if not f.exists():
+        return []
+    return [ln.strip() for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
+
+
+def line_counts(path: Path) -> dict:
+    """Non-empty lines of code per language, for "how big is it?" questions."""
+    per: dict[str, int] = {}
+    for p in path.rglob("*"):
+        rel = p.relative_to(path).as_posix()
+        ext = p.suffix.lower()
+        if not p.is_file() or ext not in CODE_EXT or any(x in SKIP_DIRS for x in rel.split("/")[:-1]):
+            continue
+        if p.name.endswith(".min.js") or p.stat().st_size > 2_000_000:
+            continue
+        try:
+            n = sum(1 for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip())
+        except (UnicodeDecodeError, OSError):
+            continue
+        lang = {".pyw": ".py", ".mjs": ".js", ".jsx": ".js", ".htm": ".html", ".tsx": ".ts"}.get(ext, ext)
+        per[lang.lstrip(".")] = per.get(lang.lstrip("."), 0) + n
+    return dict(sorted(per.items(), key=lambda kv: -kv[1]))
+
+
 def ingest_repo(path: Path, fallback_name: str, extra: dict | None = None) -> tuple[dict, list[dict]]:
     info = repo_info(path, fallback_name)
+    ignore = ignore_patterns(path)
     files: dict[str, str] = {}
     for p in sorted(path.rglob("*")):
         if not p.is_file():
             continue
         rel = p.relative_to(path).as_posix()
         if not wanted(rel) or p.stat().st_size > MAX_BYTES:
+            continue
+        if any(fnmatch.fnmatch(rel, pat) for pat in ignore):
             continue
         try:
             files[rel] = p.read_text(encoding="utf-8")
@@ -178,7 +214,7 @@ def ingest_repo(path: Path, fallback_name: str, extra: dict | None = None) -> tu
     meta = {**info, "key": repo_key, "title": title, "summary": summary,
             "description": "", "homepage": "", "pushed_at": "",
             **(extra or {}),
-            "files": len(files), "chunks": len(chunks) + 1,
+            "files": len(files), "chunks": len(chunks) + 1, "loc": line_counts(path),
             "languages": dict(sorted(langs.items(), key=lambda kv: -kv[1])[:6])}
     if not meta["summary"] and meta["description"]:
         meta["summary"] = meta["description"]
@@ -198,7 +234,7 @@ def build(paths: list[tuple[Path, str]], out: Path, owner: str = "") -> dict:
 
 def write_kb(repos: list[dict], chunks: list[dict], out: Path, owner: str = "") -> dict:
     kb = {
-        "version": 1,
+        "version": KB_VERSION,
         "owner": owner or next((r["owner"] for r in repos if r.get("owner")), ""),
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "repos": repos,
