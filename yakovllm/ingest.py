@@ -32,6 +32,9 @@ DEFAULT_OUT = ROOT / "data" / "kb.json"
 TEXT_EXT = {
     ".py", ".pyw", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".md", ".html", ".htm",
     ".yml", ".yaml", ".toml", ".ini", ".cfg", ".bat", ".sh", ".sql", ".txt", ".json",
+    # other languages, so a future project in any of them is read too
+    ".java", ".kt", ".c", ".h", ".cpp", ".hpp", ".cs", ".go", ".rs", ".swift", ".php", ".rb",
+    ".vue", ".svelte", ".scss", ".ps1", ".r", ".ipynb",
 }
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".venv", "venv", "__pycache__", ".cache", "coverage", ".next"}
 SKIP_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"}
@@ -39,7 +42,9 @@ JSON_KEEP = {"package.json", "manifest.webmanifest", "tsconfig.json"}
 MAX_BYTES = 200_000
 KB_VERSION = 2          # bump when chunks or metadata change shape: forces a full re-index
 IGNORE_FILE = ".yakovllm-ignore"  # optional, in a repo's root: glob patterns of files to skip
-CODE_EXT = {".py", ".pyw", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".html", ".htm", ".css", ".sql", ".sh", ".bat"}
+CODE_EXT = {".py", ".pyw", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".html", ".htm", ".css", ".sql", ".sh", ".bat",
+            ".java", ".kt", ".c", ".h", ".cpp", ".hpp", ".cs", ".go", ".rs", ".swift", ".php", ".rb",
+            ".vue", ".svelte", ".scss", ".ps1", ".r"}
 
 
 def log(msg: str) -> None:
