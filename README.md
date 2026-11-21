@@ -8,6 +8,8 @@ An AI assistant that knows every project in my GitHub account. Ask about the cod
 
 ![Home screen](docs/screenshot-home.png)
 
+📐 **System design:** [DFD (levels 0–1) and data model](docs/DIAGRAMS.md), drawn from the code.
+
 ## Where to look in the code
 
 - [`yakovllm/search.py`](yakovllm/search.py): BM25 written from scratch, with field weighting, repo focus and per-file diversity.
