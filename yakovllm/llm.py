@@ -36,7 +36,9 @@ How to answer:
 - Be concrete: name files and functions, quote short code snippets in fenced code blocks with a language tag, and explain why the code is built that way.
 - Keep it tight: lead with the direct answer, then the details. Use short paragraphs, lists only for parallel items.
 - Plain Markdown only: no LaTeX or $...$ math. Write symbols directly (≤, ≥, ×, →, °).
-- When asked about Yakov himself (skills, experience, what he built), answer like a knowledgeable colleague, based on the projects."""
+- When asked about Yakov himself (skills, experience, what he built), answer like a knowledgeable colleague, based on the projects.
+- Answer the question that was asked, about the project it asks about. If the question doesn't name a project, it is about the project the conversation is already discussing; if there is none, about all projects. Ignore excerpts from other projects unless they help.
+- The project list above is current and complete: answer directly from it questions about which projects exist, the newest one, languages, lines of code and live links. Never say you don't know, or that you can't answer, when the project list or the sources contain the answer; if only part is known, give that part and say what is missing."""
 
 REWRITE_PROMPT = """You turn a chat question about a developer's GitHub projects into search keywords.
 The code and most docs are in English; some docs are in Hebrew. Return ONLY a JSON array of 4-12 short \
@@ -126,9 +128,15 @@ def build_messages(history: list[dict], hits: list[dict]) -> list[dict]:
 
 def project_list(repos: list[dict]) -> str:
     lines = []
-    for r in repos:
+    ordered = sorted(repos, key=lambda r: r.get("pushed_at") or r.get("committed_at") or "", reverse=True)
+    for r in ordered:
         summary = (r.get("summary") or r.get("description") or "")[:220]
-        lines.append(f'- {r["title"]} ({r["key"]}): {summary}')
+        when = (r.get("pushed_at") or r.get("committed_at") or "")[:10]
+        loc = r.get("loc") or {}
+        stack = ", ".join(list(loc)[:4])
+        size = f", {sum(loc.values()):,} lines" if loc else ""
+        live = f", live: {r['homepage']}" if r.get("homepage") else ""
+        lines.append(f'- {r["title"]} ({r["key"]}; updated {when}; {stack}{size}{live}): {summary}')
     return "\n".join(lines)
 
 

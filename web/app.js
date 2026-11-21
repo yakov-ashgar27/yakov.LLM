@@ -99,9 +99,9 @@
 
   const BROWSER_SYSTEM = (kb) => `You are yakov.LLM, an AI assistant that knows the software projects of ${CFG.ownerName} (GitHub: ${kb.owner}) in depth.
 Projects:
-${kb.repos.map((r) => `- ${r.title} (${r.key}): ${(r.summary || r.description || '').slice(0, 220)}`).join('\n')}
+${kb.repos.map((r) => { const loc = r.loc || {}; const total = Object.values(loc).reduce((a, b) => a + b, 0); return `- ${r.title} (${r.key}; updated ${(r.pushed_at || r.committed_at || '').slice(0, 10)}; languages: ${Object.keys(loc).join(', ')}; ${total} lines of code): ${(r.summary || r.description || '').slice(0, 220)}`; }).join('\n')}
 
-Rules: reply in the language of the user's latest question (Hebrew or English; keep code and file names in English). Base every claim about the projects on the numbered <source> excerpts and cite them inline as [1], [2]. Never invent files, numbers or features; if the sources don't answer, say so and suggest where to look. Be concrete: name files and functions, use fenced code blocks with a language tag. Lead with the direct answer, keep it tight. Plain Markdown only: no LaTeX or $...$ math; write symbols like ≤ × → directly.`;
+Rules: the project list above is current and complete: use it directly for which projects exist, the newest one, languages and lines of code. Never say you don't know when the list or the sources contain the answer. Answer about the project the question or the conversation is about. Reply in the language of the user's latest question (Hebrew or English; keep code and file names in English). Base every claim about the projects on the numbered <source> excerpts and cite them inline as [1], [2]. Never invent files, numbers or features; if the sources don't answer, say so and suggest where to look. Be concrete: name files and functions, use fenced code blocks with a language tag. Lead with the direct answer, keep it tight. Plain Markdown only: no LaTeX or $...$ math; write symbols like ≤ × → directly.`;
 
   const BrowserBackend = {
     kind: 'browser',
@@ -146,7 +146,9 @@ Rules: reply in the language of the user's latest question (Hebrew or English; k
       let searchText = q;
       if (users.length > 1 && this.index.tok.tokenize(q).length < 6) searchText = users[users.length - 2].content + ' ' + q;
       const t0 = performance.now();
-      const hits = this.index.search(searchText, { k: 6, repo });
+      const earlier = messages.slice(0, -1).slice(-4).map((m) => String(m.content || '').slice(0, 600)).join(' ');
+      const contextRepos = earlier ? this.index.tok.detectRepos(earlier) : [];
+      const hits = this.index.answerContext(searchText, { k: 6, repo, contextRepos });
       const sources = hits.map((h, i) => ({ ...h.chunk, n: i + 1, score: +h.score.toFixed(3), terms: h.terms, url: this.index.githubUrl(h.chunk) }));
       onMeta({ sources, mode: this.sample ? 'claude' : 'offline', search_ms: +(performance.now() - t0).toFixed(1) });
       if (this.sample) {

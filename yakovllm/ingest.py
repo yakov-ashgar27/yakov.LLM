@@ -40,7 +40,7 @@ SKIP_DIRS = {".git", "node_modules", "dist", "build", ".venv", "venv", "__pycach
 SKIP_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"}
 JSON_KEEP = {"package.json", "manifest.webmanifest", "tsconfig.json"}
 MAX_BYTES = 200_000
-KB_VERSION = 2          # bump when chunks or metadata change shape: forces a full re-index
+KB_VERSION = 3          # bump when chunks or metadata change shape: forces a full re-index
 IGNORE_FILE = ".yakovllm-ignore"  # optional, in a repo's root: glob patterns of files to skip
 CODE_EXT = {".py", ".pyw", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".html", ".htm", ".css", ".sql", ".sh", ".bat",
             ".java", ".kt", ".c", ".h", ".cpp", ".hpp", ".cs", ".go", ".rs", ".swift", ".php", ".rb",
@@ -132,13 +132,24 @@ def describe(name: str, owner: str, files: dict[str, str]) -> tuple[str, str]:
         h1 = re.search(r"^#\s+(.+)$", readme, re.M)
         title = h1.group(1).strip() if h1 else name
     summary = ""
-    for block in re.split(r"\n\s*\n", readme):
+    intro = re.split(r"^##\s", readme, maxsplit=1, flags=re.M)[0]  # only the part before the first section
+    for block in re.split(r"\n\s*\n", intro):
         b = block.strip()
-        if b and not b.startswith(("#", "!", "|", "<", "```", "-", "*", ">")) and len(b) > 60:
-            summary = re.sub(r"\s+", " ", re.sub(r"[*_`]", "", b))[:400]
+        # skip badge rows ([![CI](...)](...)), images, headings, tables, lists, quotes and code
+        bold_tagline = b.startswith("**")  # "**Real-time fraud detection.** A streaming pipeline..."
+        if not b or (b.startswith(("#", "!", "|", "<", "```", "-", "*", ">", "[!", "[![")) and not bold_tagline) \
+                or "badge" in b.lower() or "codespaces" in b.lower() or b.count("http") >= 2:
+            continue
+        b = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", b)              # images
+        b = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", b)           # links -> their text
+        b = re.sub(r"\s+", " ", re.sub(r"[*_`]", "", b)).strip()
+        if len(b) > 40:
+            summary = b[:400]
             break
     if not summary and name.lower().endswith(".github.io"):
         summary = "The personal portfolio site with a page per project."
+    if not summary:
+        summary = re.sub(r"[^\w\s&:,.'()/-]", "", title).strip()  # a descriptive title beats a random paragraph
     return title, summary
 
 
@@ -172,6 +183,14 @@ def ignore_patterns(path: Path) -> list[str]:
     return [ln.strip() for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
 
 
+LANG_NAMES = {".py": "Python", ".pyw": "Python", ".ts": "TypeScript", ".tsx": "TypeScript", ".js": "JavaScript",
+              ".mjs": "JavaScript", ".jsx": "JavaScript", ".html": "HTML", ".htm": "HTML", ".css": "CSS",
+              ".scss": "CSS", ".sql": "SQL", ".sh": "Shell", ".bat": "Batch", ".ps1": "PowerShell", ".java": "Java",
+              ".kt": "Kotlin", ".c": "C", ".h": "C", ".cpp": "C++", ".hpp": "C++", ".cs": "C#", ".go": "Go",
+              ".rs": "Rust", ".swift": "Swift", ".php": "PHP", ".rb": "Ruby", ".vue": "Vue", ".svelte": "Svelte",
+              ".r": "R"}
+
+
 def line_counts(path: Path) -> dict:
     """Non-empty lines of code per language, for "how big is it?" questions."""
     per: dict[str, int] = {}
@@ -186,8 +205,8 @@ def line_counts(path: Path) -> dict:
             n = sum(1 for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip())
         except (UnicodeDecodeError, OSError):
             continue
-        lang = {".pyw": ".py", ".mjs": ".js", ".jsx": ".js", ".htm": ".html", ".tsx": ".ts"}.get(ext, ext)
-        per[lang.lstrip(".")] = per.get(lang.lstrip("."), 0) + n
+        lang = LANG_NAMES.get(ext, ext.lstrip("."))
+        per[lang] = per.get(lang, 0) + n
     return dict(sorted(per.items(), key=lambda kv: -kv[1]))
 
 
@@ -221,7 +240,7 @@ def ingest_repo(path: Path, fallback_name: str, extra: dict | None = None) -> tu
             **(extra or {}),
             "files": len(files), "chunks": len(chunks) + 1, "loc": line_counts(path),
             "languages": dict(sorted(langs.items(), key=lambda kv: -kv[1])[:6])}
-    if not meta["summary"] and meta["description"]:
+    if len(meta.get("description") or "") >= 20:  # the repo's own GitHub description says it best
         meta["summary"] = meta["description"]
     chunks.insert(0, overview_chunk(meta, files))
     log(f"  {repo_key}: {len(files)} files -> {len(chunks)} chunks")
@@ -237,16 +256,43 @@ def build(paths: list[tuple[Path, str]], out: Path, owner: str = "") -> dict:
     return write_kb(repos, chunks, out, owner)
 
 
+ACCOUNT_PATH = "(all projects)"
+
+
+def account_chunk(repos: list[dict], owner: str) -> dict | None:
+    """One chunk about the whole account: every project, newest first, with dates, stack and size.
+    Answers "which projects does Yakov have?", "what is the newest one?", "what does he use?"."""
+    if not repos:
+        return None
+    ordered = sorted(repos, key=lambda r: r.get("pushed_at") or r.get("committed_at") or "", reverse=True)
+    home = next((r["key"] for r in repos if r["key"] == (owner or "").lower()), ordered[0]["key"])
+    lines = [f"# All projects of {owner} on GitHub / כל הפרויקטים של יעקב ב-GitHub",
+             f"{len(repos)} projects (פרויקטים), newest first (מהחדש לישן). Portfolio, skills, technologies, experience.", ""]
+    for r in ordered:
+        loc = sum((r.get("loc") or {}).values())
+        langs = ", ".join(list((r.get("loc") or {}).keys())[:4]) or ", ".join(list((r.get("languages") or {}).keys())[:4])
+        when = (r.get("pushed_at") or r.get("committed_at") or "")[:10]
+        lines.append(f"- {r['title']} ({r['key']}), last updated {when}: {(r.get('summary') or r.get('description') or '')[:220]}"
+                     f" Stack: {langs}. {loc:,} lines of code." + (f" Live: {r['homepage']}" if r.get("homepage") else ""))
+    return {"id": f"{home}:{ACCOUNT_PATH}:1-1", "repo": home, "path": ACCOUNT_PATH, "start": 1, "end": 1,
+            "title": "All projects › overview", "kind": "overview", "text": "\n".join(lines)}
+
+
 def write_kb(repos: list[dict], chunks: list[dict], out: Path, owner: str = "") -> dict:
+    owner = owner or next((r["owner"] for r in repos if r.get("owner")), "")
+    chunks = [c for c in chunks if c.get("path") != ACCOUNT_PATH]
+    acc = account_chunk(repos, owner)
+    if acc:
+        chunks = [acc] + chunks
     kb = {
         "version": KB_VERSION,
-        "owner": owner or next((r["owner"] for r in repos if r.get("owner")), ""),
+        "owner": owner,
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "repos": repos,
         "tokenizer": {  # shared with web/engine.js
             "stopwords": sorted(tokenizer.STOPWORDS),
             "glossary": tokenizer.GLOSSARY,
-            "aliases": tokenizer.REPO_ALIASES,
+            "aliases": tokenizer.repo_aliases(repos),
             "prefix1": "".join(sorted(tokenizer.HE_PREFIX_1)),
             "prefix2": sorted(tokenizer.HE_PREFIX_2),
         },

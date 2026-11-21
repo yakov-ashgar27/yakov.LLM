@@ -81,6 +81,11 @@ GLOSSARY = {
     "רשת": ["grid"], "אתר": ["portfolio", "site"], "תיק": ["portfolio"],
     "טכנולוגיות": ["stack", "technologies"], "כלים": ["tools", "stack"],
     "דיוק": ["accuracy"], "מטמון": ["cache", "redis"], "תור": ["queue", "rq"],
+    "פרויקטים": ["projects", "project"], "יעקב": ["yakov"], "מריצים": ["run", "install", "setup", "start"],
+    "להריץ": ["run", "install", "setup", "start"], "קשה": ["challenge", "challenges", "hard"],
+    "אתגרים": ["challenges", "challenge"], "אתגר": ["challenge"], "חדש": ["new", "latest"],
+    "ביותר": [], "מסמכים": ["documents", "docs"], "מסמך": ["document"], "אבטחה": ["security"],
+    "אנומליות": ["anomaly", "anomalies"], "חריגות": ["anomaly", "anomalies"], "ניטור": ["monitoring"],
     "אינטרנט": ["offline", "network", "sync"], "רשת": ["network", "grid"],
     "ווירטואלי": ["coach", "virtual"], "הערות": ["feedback", "cue", "coach"], "הערה": ["feedback", "cue"],
     "טכניקה": ["technique", "form"], "רקע": ["background", "job", "worker"], "תזכורות": ["reminder", "reminders"],
@@ -91,13 +96,16 @@ GLOSSARY = {
     "hashed": ["argon2", "hash"], "hashing": ["argon2", "hash"], "shortest": ["bfs"],
 }
 
-REPO_ALIASES = {
+REPO_ALIASES = {  # extra names people use; repo names and titles are added automatically (repo_aliases)
     "bomberman": ["bomberman", "בומברמן", "בומבמן", "pygame"],
-    "fitvision-ai": ["fitvision", "פיטוויזן", "פיטויז'ן", "פיטוויז", "כושר", "mediapipe", "גמר"],
-    "the-map-lies": ["map lies", "the map lies", "המפה משקרת", "מפה משקרת", "map-lies"],
-    "yakov-ashgar27.github.io": ["portfolio", "פורטפוליו", "אתר", "תיק עבודות", "github.io"],
-    "yakov-ashgar27": ["profile", "פרופיל", "about", "עליי", "עלי", "יעקב"],
+    "fitvision-ai": ["fitvision", "פיטוויזן", "פיטויז'ן", "פיטוויז", "כושר", "mediapipe", "פרויקט הגמר"],
+    "the-map-lies": ["map lies", "המפה משקרת", "מפה משקרת"],
+    "yakov-ashgar27.github.io": ["portfolio", "פורטפוליו", "תיק עבודות", "github.io"],
+    "yakov-ashgar27": ["profile readme", "פרופיל"],
+    "yakov.llm": ["yakov.llm", "yakovllm", "יעקב llm"],
 }
+GENERIC_NAME_PARTS = {"the", "yakov", "ashgar", "app", "project", "web", "api", "ai", "tool", "system", "analytics",
+                      "github", "io", "feature", "safe", "radar"}
 
 
 def _normalize(text: str) -> str:
@@ -174,11 +182,44 @@ def expand_query(query: str) -> list[str]:
     return tokens + [e for e in extra if e not in tokens]
 
 
-def detect_repos(query: str) -> list[str]:
-    """Repos the question names explicitly ("in Bomberman, ..."), in REPO_ALIASES order."""
-    norm = _normalize(query).lower()
+def squash(text: str) -> str:
+    """Lower-case letters and digits only: "WiFi-Doctor" and "wifi doctor" both become "wifidoctor"."""
+    return re.sub(r"[^a-z0-9\u05d0-\u05ea]", "", _normalize(text).lower())
+
+
+def repo_aliases(repos: list[dict]) -> dict[str, list[str]]:
+    """Names a question may use for each repo: its key, its title, the distinctive word in them,
+    plus the hand-written REPO_ALIASES. Stored in kb.json so the browser engine uses the same list."""
+    out: dict[str, list[str]] = {}
+    for r in repos:
+        key = r["key"]
+        names = list(REPO_ALIASES.get(key, []))
+        names.append(key)
+        parts = [p for p in re.split(r"[-_.\s]+", key) if p]
+        if parts and len(parts[0]) >= 4 and parts[0] not in GENERIC_NAME_PARTS:
+            names.append(parts[0])
+        title = re.sub(r"[^\w\s'.-]", " ", r.get("title") or "").strip()
+        title = re.split(r"\s[—–:|·-]\s|:", title)[0].strip()
+        if title and title.lower() not in ("profile readme", "portfolio website"):
+            names.append(title)
+            first = re.split(r"\s+", title)[0]
+            if len(squash(first)) >= 5 and first.lower() not in GENERIC_NAME_PARTS:
+                names.append(first)
+        seen, uniq = set(), []
+        for n in names:
+            k = squash(n)
+            if len(k) >= 3 and k not in seen:
+                seen.add(k)
+                uniq.append(n.lower())
+        out[key] = uniq
+    return out
+
+
+def detect_repos(query: str, aliases: dict[str, list[str]] | None = None) -> list[str]:
+    """Repos the question names explicitly ("in Bomberman, ...", "wifi doctor")."""
+    q = squash(query)
     found = []
-    for repo, aliases in REPO_ALIASES.items():
-        if any(a in norm for a in aliases):
+    for repo, names in (aliases if aliases is not None else REPO_ALIASES).items():
+        if any(len(squash(a)) >= 3 and squash(a) in q for a in names):
             found.append(repo)
     return found

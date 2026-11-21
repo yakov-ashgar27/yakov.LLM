@@ -392,6 +392,33 @@ def test_ignore_file_and_line_counts(tmp_path):
                      ".yakovllm-ignore": "# skip the UI\nweb/index.html\n"})
     meta, chunks = ingest.ingest_repo(repo, "proj")
     assert not any(c["path"] == "web/index.html" for c in chunks)
-    assert meta["loc"]["py"] == 30
+    assert meta["loc"]["Python"] == 30
     overview = chunks[0]
-    assert overview["path"] == "(overview)" and "שורות קוד" in overview["text"] and "py: 30" in overview["text"]
+    assert overview["path"] == "(overview)" and "שורות קוד" in overview["text"] and "Python: 30" in overview["text"]
+
+
+def test_fact_sheet_is_always_in_the_answer_context():
+    ix = Index.load(ROOT / "data" / "kb.json")
+    some = next(r["key"] for r in ix.kb["repos"] if r.get("loc"))
+    hits = ix.answer_context("כמה שורות קוד יש בפרויקט?", repo=some)
+    assert hits[0].chunk["path"] == "(overview)" and hits[0].chunk["repo"] == some
+    assert "שורות קוד" in hits[0].chunk["text"]
+    general = ix.answer_context("מה הפרויקט הכי חדש?")
+    assert general[0].chunk["path"] == "(all projects)"
+    follow = ix.answer_context("ומה היה הכי קשה שם?", context_repos=[some])
+    assert follow[0].chunk["repo"] == some
+
+
+def test_repo_names_are_recognised_loosely():
+    from yakovllm import tokenizer
+    aliases = tokenizer.repo_aliases([{"key": "wifi-doctor", "title": "🩺 WiFi-Doctor"},
+                                      {"key": "pulseport-analytics", "title": "⚓ PulsePort Analytics"}])
+    assert tokenizer.detect_repos("איך מריצים את wifi doctor?", aliases) == ["wifi-doctor"]
+    assert tokenizer.detect_repos("מה זה Pulse Port", aliases) == ["pulseport-analytics"]
+
+
+def test_summary_skips_badges_and_uses_the_tagline():
+    readme = ("# GuardStream\n\n[![CI](https://x/badge.svg)](https://x)\n![Python](https://img.shields.io/badge/x)\n\n"
+              "**Real-time fraud detection.** A streaming pipeline that scores every card transaction.\n")
+    title, summary = ingest.describe("guardstream", "u", {"README.md": readme})
+    assert title == "GuardStream" and summary.startswith("Real-time fraud detection.")

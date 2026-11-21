@@ -5,7 +5,7 @@
 (function (root) {
   'use strict';
 
-  const K1 = 1.2, B = 0.75, META_WEIGHT = 3, REPO_BOOST = 1.6, README_BOOST = 1.15;
+  const K1 = 1.2, B = 0.75, META_WEIGHT = 3, REPO_BOOST = 3.0, CONTEXT_BOOST = 1.8, README_BOOST = 1.15;
   const TEST_PENALTY = 0.8, MAX_PER_FILE = 2;
   const TEST_WORDS = new Set(['test', 'tests', 'pytest', 'vitest', 'בדיקה', 'בדיקות', 'e2e', 'playwright']);
 
@@ -74,9 +74,11 @@
       return tokens.concat(extra.filter((e) => !have.has(e)));
     }
 
+    const squash = (t) => normalize(t).toLowerCase().replace(/[^a-z0-9\u05d0-\u05ea]/g, '');
+
     function detectRepos(query) {
-      const norm = normalize(query).toLowerCase();
-      return Object.keys(ALIASES).filter((r) => ALIASES[r].some((a) => norm.includes(a)));
+      const q = squash(query);
+      return Object.keys(ALIASES).filter((r) => ALIASES[r].some((a) => squash(a).length >= 3 && q.includes(squash(a))));
     }
 
     return { tokenize, expandQuery, detectRepos };
@@ -111,6 +113,7 @@
         }
         this.lengths.push(len);
       });
+      this.byId = new Map(this.chunks.map((c) => [c.id, c]));
       this.n = this.chunks.length;
       this.avgLen = this.n ? this.lengths.reduce((a, b) => a + b, 0) / this.n : 1;
     }
@@ -120,12 +123,13 @@
       return Math.log(1 + (this.n - df + 0.5) / (df + 0.5));
     }
 
-    search(query, { k = 6, repo = null, expand = true, extraTerms = null } = {}) {
+    search(query, { k = 6, repo = null, expand = true, extraTerms = null, contextRepos = null } = {}) {
       const terms = expand ? this.tok.expandQuery(query) : this.tok.tokenize(query);
       if (extraTerms) for (const t of extraTerms) terms.push(...this.tok.tokenize(t));
       const q = new Map();
       for (const t of terms) q.set(t, (q.get(t) || 0) + 1);
       const focus = new Set(repo ? [] : this.tok.detectRepos(query));
+      const context = new Set(repo || focus.size ? [] : (contextRepos || []));
       const wantsTests = terms.some((t) => TEST_WORDS.has(t));
       const scores = new Map();
       const matched = new Map();
@@ -145,6 +149,7 @@
         const c = this.chunks[i];
         if (repo && c.repo !== repo) continue;
         if (focus.has(c.repo)) s *= REPO_BOOST;
+        else if (context.has(c.repo)) s *= CONTEXT_BOOST;
         if (c.path.toLowerCase().endsWith('readme.md')) s *= README_BOOST;
         if (!wantsTests && isTestPath(c.path)) s *= TEST_PENALTY;
         ranked.push([s, i]);
@@ -162,6 +167,18 @@
         if (out.length >= k) break;
       }
       return out;
+    }
+
+    // Same as Index.answer_context in search.py: pin the fact sheet of the project in play.
+    answerContext(query, { k = 6, repo = null, contextRepos = null } = {}) {
+      const hits = this.search(query, { k, repo, contextRepos });
+      const detected = this.tok.detectRepos(query);
+      const targets = repo ? [repo] : (detected.length ? detected : (contextRepos || []));
+      const wanted = targets.length ? targets.slice(0, 2).map((t) => `${t}:(overview):1-1`)
+        : this.chunks.filter((c) => c.path === '(all projects)').slice(0, 1).map((c) => c.id);
+      const have = new Set(hits.map((h) => h.chunk.id));
+      const pinned = wanted.filter((id) => this.byId.has(id) && !have.has(id)).map((id) => ({ chunk: this.byId.get(id), score: 0, terms: [] }));
+      return pinned.concat(hits).slice(0, k + pinned.length);
     }
 
     githubUrl(c) {

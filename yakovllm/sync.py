@@ -54,7 +54,8 @@ class GitHubSync:
             repos = {r["key"]: r for r in kb["repos"]}
             chunks_by_repo: dict[str, list[dict]] = {}
             for c in kb["chunks"]:
-                chunks_by_repo.setdefault(c["repo"], []).append(c)
+                if c.get("path") != ingest.ACCOUNT_PATH:  # rebuilt by write_kb every time
+                    chunks_by_repo.setdefault(c["repo"], []).append(c)
 
             result = {"added": [], "updated": [], "removed": []}
             seen = set()

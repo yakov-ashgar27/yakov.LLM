@@ -24,7 +24,8 @@ from . import tokenizer
 K1 = 1.2
 B = 0.75
 META_WEIGHT = 3
-REPO_BOOST = 1.6
+REPO_BOOST = 3.0       # the question names the project
+CONTEXT_BOOST = 1.8    # the conversation so far was about the project
 README_BOOST = 1.15
 TEST_PENALTY = 0.8    # test files echo the code's words; prefer the code unless tests are asked about
 TEST_WORDS = {"test", "tests", "pytest", "vitest", "בדיקה", "בדיקות", "e2e", "playwright"}
@@ -58,6 +59,7 @@ class Index:
     def __init__(self, kb: dict):
         self.kb = kb
         self.repos = {r["key"]: r for r in kb["repos"]}
+        self.aliases = (kb.get("tokenizer") or {}).get("aliases") or tokenizer.repo_aliases(kb["repos"])
         self.chunks: list[dict] = kb["chunks"]
         self.postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
         self.lengths: list[int] = []
@@ -69,6 +71,7 @@ class Index:
             self.lengths.append(sum(counts.values()))
             for t, tf in counts.items():
                 self.postings[t].append((i, tf))
+        self.by_id = {c["id"]: c for c in self.chunks}
         self.n = len(self.chunks)
         self.avg_len = (sum(self.lengths) / self.n) if self.n else 1.0
 
@@ -81,13 +84,15 @@ class Index:
         return math.log(1 + (self.n - df + 0.5) / (df + 0.5))
 
     def search(self, query: str, k: int = 6, repo: str | None = None,
-               expand: bool = True, extra_terms: list[str] | None = None) -> list[Hit]:
+               expand: bool = True, extra_terms: list[str] | None = None,
+               context_repos: list[str] | None = None) -> list[Hit]:
         terms = tokenizer.expand_query(query) if expand else tokenizer.tokenize(query)
         if extra_terms:
             for t in extra_terms:
                 terms.extend(tokenizer.tokenize(t))
         q = Counter(terms)
-        focus = set(tokenizer.detect_repos(query)) if not repo else set()
+        focus = set(self.detect(query)) if not repo else set()
+        context = set(context_repos or []) if not repo and not focus else set()
         wants_tests = bool(TEST_WORDS & set(terms))
         scores: dict[int, float] = defaultdict(float)
         matched: dict[int, list[str]] = defaultdict(list)
@@ -107,6 +112,8 @@ class Index:
                 continue
             if c["repo"] in focus:
                 s *= REPO_BOOST
+            elif c["repo"] in context:
+                s *= CONTEXT_BOOST
             if c["path"].lower().endswith("readme.md"):
                 s *= README_BOOST
             if not wants_tests and is_test_path(c["path"]):
@@ -125,6 +132,24 @@ class Index:
             if len(out) >= k:
                 break
         return out
+
+    def answer_context(self, query: str, k: int = 6, repo: str | None = None,
+                       extra_terms: list[str] | None = None, context_repos: list[str] | None = None) -> list[Hit]:
+        """Search hits for a chat answer, with the right fact sheet pinned first.
+
+        A project's overview chunk (summary, file types, lines of code, folders, links) or, when no
+        project is in play, the all-projects chunk, is always included, so questions like "how many
+        lines of code?" or "which languages?" never depend on keyword luck."""
+        hits = self.search(query, k=k, repo=repo, extra_terms=extra_terms, context_repos=context_repos)
+        targets = [repo] if repo else (self.detect(query) or list(context_repos or []))
+        wanted = [f"{t}:(overview):1-1" for t in targets[:2]] if targets else \
+                 [c["id"] for c in self.chunks if c["path"] == "(all projects)"][:1]
+        have = {h.chunk["id"] for h in hits}
+        pinned = [Hit(self.by_id[i], 0.0, []) for i in wanted if i in self.by_id and i not in have]
+        return (pinned + hits)[: k + len(pinned)]
+
+    def detect(self, text: str) -> list[str]:
+        return tokenizer.detect_repos(text, self.aliases)
 
     def github_url(self, chunk: dict) -> str:
         r = self.repos.get(chunk["repo"], {})
