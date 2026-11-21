@@ -16,4 +16,6 @@ jobs:
       - name: Tests (Python + browser engine parity)
         run: python -m pytest -q
       - name: Retrieval evaluation
-        run: python eval/run_eval.py | tee -a "$GITHUB_STEP_SUMMARY"
+        run: |
+          python eval/run_eval.py | tee -a "$GITHUB_STEP_SUMMARY"
+          python eval/run_bank.py | tee -a "$GITHUB_STEP_SUMMARY"

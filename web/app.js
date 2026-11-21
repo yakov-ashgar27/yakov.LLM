@@ -148,7 +148,7 @@ Rules: the project list above is current and complete: use it directly for which
       const t0 = performance.now();
       const earlier = messages.slice(0, -1).slice(-4).map((m) => String(m.content || '').slice(0, 600)).join(' ');
       const contextRepos = earlier ? this.index.tok.detectRepos(earlier) : [];
-      const hits = this.index.answerContext(searchText, { k: 6, repo, contextRepos });
+      const hits = this.index.answerContext(searchText, { k: 8, repo, contextRepos });
       const sources = hits.map((h, i) => ({ ...h.chunk, n: i + 1, score: +h.score.toFixed(3), terms: h.terms, url: this.index.githubUrl(h.chunk) }));
       onMeta({ sources, mode: this.sample ? 'claude' : 'offline', search_ms: +(performance.now() - t0).toFixed(1) });
       if (this.sample) {

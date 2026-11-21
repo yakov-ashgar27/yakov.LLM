@@ -401,12 +401,13 @@ def test_fact_sheet_is_always_in_the_answer_context():
     ix = Index.load(ROOT / "data" / "kb.json")
     some = next(r["key"] for r in ix.kb["repos"] if r.get("loc"))
     hits = ix.answer_context("כמה שורות קוד יש בפרויקט?", repo=some)
-    assert hits[0].chunk["path"] == "(overview)" and hits[0].chunk["repo"] == some
-    assert "שורות קוד" in hits[0].chunk["text"]
+    sheet = next(h for h in hits if h.chunk["path"] == "(overview)")
+    assert sheet.chunk["repo"] == some and "שורות קוד" in sheet.chunk["text"]
+    assert all(h.chunk["repo"] == some for h in hits)
     general = ix.answer_context("מה הפרויקט הכי חדש?")
-    assert general[0].chunk["path"] == "(all projects)"
+    assert any(h.chunk["path"] == "(all projects)" for h in general)
     follow = ix.answer_context("ומה היה הכי קשה שם?", context_repos=[some])
-    assert follow[0].chunk["repo"] == some
+    assert all(h.chunk["repo"] == some for h in follow)
 
 
 def test_repo_names_are_recognised_loosely():
@@ -422,3 +423,26 @@ def test_summary_skips_badges_and_uses_the_tagline():
               "**Real-time fraud detection.** A streaming pipeline that scores every card transaction.\n")
     title, summary = ingest.describe("guardstream", "u", {"README.md": readme})
     assert title == "GuardStream" and summary.startswith("Real-time fraud detection.")
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_browser_answer_context_matches_python():
+    qs = ["ספר לי על DocMind", "כמה שורות קוד יש ב-GuardStream?", "מה הפרויקט הכי חדש?", "How do I run wifi doctor?"]
+    script = f"""
+      const {{Index}} = require({json.dumps(str(ROOT / 'web' / 'engine.js'))});
+      const kb = JSON.parse(require('fs').readFileSync({json.dumps(str(ROOT / 'data' / 'kb.json'))}, 'utf8'));
+      const ix = new Index(kb);
+      console.log(JSON.stringify({json.dumps(qs)}.map(q => ix.answerContext(q).map(h => h.chunk.id))));
+    """
+    js = json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout)
+    ix = Index.load(ROOT / "data" / "kb.json")
+    for q, j in zip(qs, js):
+        assert [h.chunk["id"] for h in ix.answer_context(q)] == j, q
+
+
+def test_question_bank_stays_on_topic():
+    sys.path.insert(0, str(ROOT / "eval"))
+    from run_bank import run
+    s = run(Index.load(ROOT / "data" / "kb.json"))["summary"]
+    assert s["fact_sheet"] == 1.0 and s["account_overview"] == 1.0
+    assert s["on_topic"] >= 0.95 and s["top_on_topic"] >= 0.95, s

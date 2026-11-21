@@ -133,20 +133,39 @@ class Index:
                 break
         return out
 
-    def answer_context(self, query: str, k: int = 6, repo: str | None = None,
+    def answer_context(self, query: str, k: int = 8, repo: str | None = None,
                        extra_terms: list[str] | None = None, context_repos: list[str] | None = None) -> list[Hit]:
-        """Search hits for a chat answer, with the right fact sheet pinned first.
+        """The excerpts a chat answer is written from.
 
-        A project's overview chunk (summary, file types, lines of code, folders, links) or, when no
-        project is in play, the all-projects chunk, is always included, so questions like "how many
-        lines of code?" or "which languages?" never depend on keyword luck."""
-        hits = self.search(query, k=k, repo=repo, extra_terms=extra_terms, context_repos=context_repos)
-        targets = [repo] if repo else (self.detect(query) or list(context_repos or []))
-        wanted = [f"{t}:(overview):1-1" for t in targets[:2]] if targets else \
-                 [c["id"] for c in self.chunks if c["path"] == "(all projects)"][:1]
+        1. Work out which project(s) the question is about: the one picked in the UI, else the ones
+           the question names, else the ones the conversation was about.
+        2. Search, keeping only those projects (other projects only fill in if too little is found).
+        3. Pin the project's fact sheet (summary, languages, lines of code, folders, links) and the
+           start of its README, which answer most everyday questions: what it is, why, how to run it,
+           what it's built with. With no project in play, pin the all-projects overview instead.
+        """
+        named = self.detect(query)
+        targets = [repo] if repo else (named or list(context_repos or []))
+        targets = targets[:3]
+        if targets:
+            pool = self.search(query, k=60, extra_terms=extra_terms, context_repos=targets)
+            hits = [h for h in pool if h.chunk["repo"] in targets][:k]  # the fact sheet below covers thin matches
+        else:
+            hits = self.search(query, k=k, extra_terms=extra_terms)
+        wanted: list[str] = []
+        if targets:
+            for t in targets[:2]:
+                wanted.append(f"{t}:(overview):1-1")
+                readme = sorted((c for c in self.chunks if c["repo"] == t and c["path"].lower() == "readme.md"),
+                                key=lambda c: c["start"])
+                wanted += [c["id"] for c in readme[:2]]
+        else:
+            wanted += [c["id"] for c in self.chunks if c["path"] == "(all projects)"][:1]
+            owner = (self.kb.get("owner") or "").lower()
+            wanted += [c["id"] for c in self.chunks if c["repo"] == owner and c["path"].lower() == "readme.md"][:1]
         have = {h.chunk["id"] for h in hits}
-        pinned = [Hit(self.by_id[i], 0.0, []) for i in wanted if i in self.by_id and i not in have]
-        return (pinned + hits)[: k + len(pinned)]
+        pinned = [Hit(self.by_id[i], 0.0, []) for i in dict.fromkeys(wanted) if i in self.by_id and i not in have]
+        return pinned + hits
 
     def detect(self, text: str) -> list[str]:
         return tokenizer.detect_repos(text, self.aliases)

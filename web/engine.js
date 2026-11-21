@@ -169,16 +169,33 @@
       return out;
     }
 
-    // Same as Index.answer_context in search.py: pin the fact sheet of the project in play.
-    answerContext(query, { k = 6, repo = null, contextRepos = null } = {}) {
-      const hits = this.search(query, { k, repo, contextRepos });
-      const detected = this.tok.detectRepos(query);
-      const targets = repo ? [repo] : (detected.length ? detected : (contextRepos || []));
-      const wanted = targets.length ? targets.slice(0, 2).map((t) => `${t}:(overview):1-1`)
-        : this.chunks.filter((c) => c.path === '(all projects)').slice(0, 1).map((c) => c.id);
+    // Same as Index.answer_context in search.py: stay on the project in play and pin its fact sheet.
+    answerContext(query, { k = 8, repo = null, contextRepos = null } = {}) {
+      const named = this.tok.detectRepos(query);
+      const targets = (repo ? [repo] : (named.length ? named : (contextRepos || []))).slice(0, 3);
+      let hits;
+      if (targets.length) {
+        const pool = this.search(query, { k: 60, contextRepos: targets });
+        hits = pool.filter((h) => targets.includes(h.chunk.repo)).slice(0, k);
+      } else {
+        hits = this.search(query, { k });
+      }
+      const wanted = [];
+      if (targets.length) {
+        for (const t of targets.slice(0, 2)) {
+          wanted.push(`${t}:(overview):1-1`);
+          const readme = this.chunks.filter((c) => c.repo === t && c.path.toLowerCase() === 'readme.md').sort((a, b) => a.start - b.start);
+          for (const c of readme.slice(0, 2)) wanted.push(c.id);
+        }
+      } else {
+        for (const c of this.chunks.filter((c) => c.path === '(all projects)').slice(0, 1)) wanted.push(c.id);
+        const owner = (this.kb.owner || '').toLowerCase();
+        for (const c of this.chunks.filter((c) => c.repo === owner && c.path.toLowerCase() === 'readme.md').slice(0, 1)) wanted.push(c.id);
+      }
       const have = new Set(hits.map((h) => h.chunk.id));
-      const pinned = wanted.filter((id) => this.byId.has(id) && !have.has(id)).map((id) => ({ chunk: this.byId.get(id), score: 0, terms: [] }));
-      return pinned.concat(hits).slice(0, k + pinned.length);
+      const pinned = [...new Set(wanted)].filter((id) => this.byId.has(id) && !have.has(id))
+        .map((id) => ({ chunk: this.byId.get(id), score: 0, terms: [] }));
+      return pinned.concat(hits);
     }
 
     githubUrl(c) {

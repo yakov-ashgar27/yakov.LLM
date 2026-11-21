@@ -60,6 +60,19 @@ Retrieval measured on [38 questions](eval/questions.json) (20 in Hebrew, 18 in E
 
 The glossary raised Hebrew recall from 70% to 85%. These numbers don't include the model keyword rewrite, which needs an API key at evaluation time. `python eval/run_eval.py` prints the table and lists the misses.
 
+### Everyday questions
+
+[`eval/question_bank.json`](eval/question_bank.json) holds the questions people actually ask about a project ("what is it?", "how do I run it?", "how many lines of code?", "what was hardest?", follow-ups like "and how do I run it?"), in Hebrew and English. They are asked about every project, 234 questions in all, plus 8 questions about the whole account. `python eval/run_bank.py` checks what the model gets to read:
+
+| Check | Result |
+| --- | --- |
+| The project's fact sheet (summary, languages, lines of code, links) is in the context | 100% |
+| Excerpts come from the project that was asked about | 100% |
+| Follow-up questions stay on the project of the conversation | 100% |
+| Questions about the whole account get the all-projects overview | 100% |
+
+The bank isn't a list of canned answers. It checks that whatever is asked, the model reads the right project, so it can answer in its own words.
+
 ## Run it
 
 Python 3.10+ is all you need, with **no dependencies** to install.

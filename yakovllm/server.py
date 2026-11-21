@@ -270,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             # Projects the conversation was already about: "what was hardest there?" stays on topic.
             earlier = " ".join(str(m.get("content", ""))[:600] for m in messages[:-1][-4:])
             context = ix.detect(earlier) if earlier else []
-            hits = ix.answer_context(search_text, k=6, repo=repo, extra_terms=keywords, context_repos=context)
+            hits = ix.answer_context(search_text, k=8, repo=repo, extra_terms=keywords, context_repos=context)
             sources = source_payload(ix, hits)
             send("meta", {"sources": sources, "keywords": keywords, "mode": "llm" if llm.has_key() else "offline",
                           "search_ms": round((time.perf_counter() - t0) * 1000, 1)})

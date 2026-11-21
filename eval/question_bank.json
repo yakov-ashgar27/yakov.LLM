@@ -1,0 +1,22 @@
+{
+  "about": "Everyday questions people ask about a project. {p} is replaced by each project's name. The bank checks that the answer context stays on the project asked about and always holds its fact sheet; it is not a list of canned answers.",
+  "project_questions": [
+    "ספר לי על {p}", "מה {p} עושה?", "למה בנו את {p}? איזו בעיה הוא פותר?", "איך מריצים את {p}?",
+    "באילו טכנולוגיות {p} משתמש?", "כמה שורות קוד יש ב-{p}?", "באיזו שפת תכנות כתוב {p}?",
+    "מה הארכיטקטורה של {p}?", "יש בדיקות אוטומטיות ב-{p}?", "מה החלק הכי מעניין בקוד של {p}?",
+    "איפה אפשר לראות את {p} באוויר?", "איך {p} שומר את הנתונים?", "מה היה האתגר הכי גדול ב-{p}?",
+    "איך {p} מתמודד עם אבטחה?", "מה אפשר לשפר ב-{p}?",
+    "What is {p}?", "How do I run {p} locally?", "What stack does {p} use?",
+    "How many lines of code are in {p}?", "How is {p} tested?", "What is the architecture of {p}?",
+    "Where can I see a live demo of {p}?", "What was the hardest part of building {p}?"
+  ],
+  "follow_ups": [
+    ["ספר לי על {p}", "ואיך מריצים אותו?"],
+    ["What is {p}?", "Which languages is it written in?"],
+    ["ספר לי על {p}", "מה היה הכי קשה שם?"]
+  ],
+  "account_questions": [
+    "אילו פרויקטים יש ליעקב?", "מה הפרויקט הכי חדש?", "באילו טכנולוגיות יעקב משתמש?", "מי זה יעקב?",
+    "איזה פרויקט הכי גדול?", "Which projects use React?", "What is Yakov good at?", "כמה פרויקטים יש לו?"
+  ]
+}
