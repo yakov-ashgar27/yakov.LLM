@@ -56,8 +56,11 @@
       <button class="icon-btn menu-btn" id="menu" aria-label="תפריט">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
       </button>
-      <div class="title" id="chat-title" dir="auto"></div>
+      <div class="title" id="chat-title" dir="auto" tabindex="0" role="button" title="לחיצה לשינוי שם השיחה" aria-label="שם השיחה. לחיצה לשינוי"></div>
       <span class="mode-pill" id="mode">…</span>
+      <button class="icon-btn" id="export" aria-label="שמירת השיחה כקובץ" title="שמירת השיחה כקובץ Markdown">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+      </button>
     </div>
 
     <div class="scroller" id="scroller">
@@ -77,11 +80,26 @@
       <div class="thread" id="thread" aria-live="polite"></div>
     </div>
 
+    <div class="drop-hint" aria-hidden="true"><div><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6L15 7.1"/></svg><b>שחרר כדי לצרף</b><span>קבצים או תיקייה שלמה: Word, PDF, PowerPoint, Excel, טקסט וקוד</span></div></div>
+
     <div class="dock">
+    <button class="to-bottom" id="to-bottom" aria-label="גלילה לסוף השיחה"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg></button>
       <div class="composer">
+        <div class="attachments" id="attachments" hidden aria-label="קבצים מצורפים"></div>
         <label class="sr-only" for="input">שאלה ל-yakov.LLM</label>
         <textarea id="input" rows="1" dir="auto" placeholder="שאל על הקוד, על ההחלטות או איך להריץ…"></textarea>
         <div class="composer-row">
+          <div class="attach-wrap">
+            <button class="icon-btn" id="attach" aria-label="צירוף קבצים או תיקייה" aria-haspopup="menu" aria-expanded="false" title="צירוף קבצים">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+            <div class="attach-menu" id="attach-menu" role="menu" hidden>
+              <button role="menuitem" id="pick-files"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg><span><b>העלאת קבצים</b><small>Word, PDF, PowerPoint, Excel, טקסט, קוד</small></span></button>
+              <button role="menuitem" id="pick-folder"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span><b>העלאת תיקייה</b><small>כל הקבצים שבתוכה, כמקורות לשיחה</small></span></button>
+            </div>
+            <input type="file" id="file-input" multiple hidden accept=".txt,.md,.markdown,.csv,.json,.html,.htm,.xml,.yml,.yaml,.pdf,.docx,.pptx,.xlsx,.py,.js,.ts,.tsx,.jsx,.java,.kt,.c,.cpp,.cs,.go,.rs,.rb,.php,.swift,.sql,.sh,.css,.ipynb,text/*">
+            <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
+          </div>
           <label class="sr-only" for="scope">חיפוש בפרויקט</label>
           <select class="scope" id="scope"><option value="">כל הפרויקטים</option></select>
           <span class="spacer"></span>
@@ -93,7 +111,7 @@
           </button>
         </div>
       </div>
-      <p class="fine">התשובות מבוססות על הקוד ב-GitHub ועלולות לטעות. כדאי לבדוק את המקורות.</p>
+      <p class="fine">התשובות מבוססות על הקוד ב-GitHub ועלולות לטעות. השיחות נשמרות כדי שאזכור אותך בפעם הבאה.</p>
     </div>
   </main>
 </div>
@@ -138,6 +156,7 @@
 
 <script src="engine.js"></script>
 <script src="markdown.js"></script>
+<script src="files.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -12,6 +12,8 @@ An AI assistant that knows every project in my GitHub account. Ask about the cod
 
 - [`yakovllm/search.py`](yakovllm/search.py): BM25 written from scratch, with field weighting, repo focus and per-file diversity.
 - [`yakovllm/tokenizer.py`](yakovllm/tokenizer.py): one tokenizer for Hebrew and code. It splits `findPathStep` into its words and strips Hebrew prefixes (ו, ה, ב, ל…).
+- [`yakovllm/facts.py`](yakovllm/facts.py): reads the code itself (Python with `ast`, JS/TS/Java with careful patterns) and writes a fact card for every function, class, API route and DB table, every file, and every project: dependencies, run commands, tests, CI, endpoints, settings.
+- [`yakovllm/memory.py`](yakovllm/memory.py): remembers who it talked with and what they said, kept apart from the knowledge base as unverified notes.
 - [`yakovllm/sync.py`](yakovllm/sync.py): follows a GitHub account and re-indexes only the repos that changed, then swaps the live index without a restart.
 - [`web/engine.js`](web/engine.js): the same search engine in JavaScript, so the static demo needs no server. A test checks that both return identical results.
 - [`eval/`](eval/): 38 questions with known answers, and the script that scores retrieval.
@@ -33,7 +35,10 @@ flowchart LR
 1. **Ingest.** Every text file that helps answer questions (source code, Markdown, HTML pages, config) is split into chunks that keep their repo, path and line range. Markdown is split by headings, code into 60-line windows that prefer to end on a blank line, HTML pages into visible text. Each repo also gets an overview chunk with its summary, file types and folders.
 2. **Search.** A question is tokenized the same way and scored with BM25. Hebrew words are also mapped to the English words the code uses ("אויב" → `enemy`), because a Hebrew question about English code otherwise shares no words with it. With an API key, a fast model also suggests search keywords and probable function names.
 3. **Answer.** The six best excerpts go to the model with the conversation, and the model must cite them as `[1]`, `[2]`. The model is pluggable: Claude, or free options (open models on Groq, Gemini Flash), or any OpenAI-compatible endpoint. In the UI each citation opens the cited lines, highlighted, with a link to the same lines on GitHub.
-4. **Stay current.** See below.
+4. **Code facts.** Raw code answers questions asked in the code's words. People ask in their own words ("where is the password hashed?", "what does it depend on?", "who calls this?"), so every push also regenerates fact cards from the code: one per function, class, method, React component, API route and database table (signature, docstring, file and lines, what it calls, where it is used), one per file (role, definitions, imports), and a few per project (dependencies, how to run, tests and CI, endpoints, tables, environment variables, folder structure). There are about 5,000 cards across 11 projects. They are generated, never hand-written, so they can't go stale.
+5. **Your files too.** Attach files or a whole folder (Word, PDF, PowerPoint, Excel, text, code). They are read into text (Office files in the browser, PDF on the server), searched with the same engine, and their best passages go to the model next to the project sources. So you can ask "which project fits this job description?".
+6. **Memory.** The app remembers who it talked with (a random id the browser keeps, plus a name if one is given) and their earlier questions, so a returning visitor is greeted with context. What people *claim* is stored as an unverified note for Yakov to review on `/admin.html`, and never becomes part of the knowledge base. A name from another device only reveals that someone by that name talked before, never what they said.
+7. **Stay current.** See below.
 
 ![A citation opens the exact lines](docs/screenshot-source.png)
 
@@ -71,6 +76,8 @@ The glossary raised Hebrew recall from 70% to 85%. These numbers don't include t
 | Follow-up questions stay on the project of the conversation | 100% |
 | Questions about the whole account get the all-projects overview | 100% |
 
+[`eval/run_symbols.py`](eval/run_symbols.py) generates questions about randomly sampled functions, classes and files, in Hebrew and English, often with the identifier written as words ("find path step"), and checks that the right file reaches the model: **95%** of 750 questions. The misses are names like `__init__` that are ambiguous by nature.
+
 The bank isn't a list of canned answers. It checks that whatever is asked, the model reads the right project, so it can answer in its own words.
 
 ## Run it
@@ -83,7 +90,9 @@ export GROQ_API_KEY=gsk_...              # free written answers (or ANTHROPIC_AP
 python -m yakovllm                       # http://localhost:8000
 ```
 
-Without any key the app still works: answers are the matching excerpts.
+Without any key the app still works: answers are the matching excerpts. Reading PDF attachments needs `pip install pypdf` (the Docker image has it); everything else is standard library.
+
+Memory is kept in `.cache/memory.json`. A free host wipes its disk on each deploy, so to keep it, create a **private** repo and set `MEMORY_REPO=owner/name` and `MEMORY_TOKEN` (a fine-grained token with Contents read & write on that repo only). Set `ADMIN_TOKEN` to read it at `/admin.html`.
 
 | Provider | Key | Cost | Default model |
 | --- | --- | --- | --- |
@@ -112,12 +121,14 @@ Settings are in [`.env.example`](.env.example).
 pip install pytest && python -m pytest -q
 ```
 
-There are 26 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against fake Claude and OpenAI-compatible servers that speak their streaming protocols, webhook signatures, rate limiting, CORS for the static demo, identical Python and JavaScript search results on every evaluation question, and a guard that fails CI if Hit@5 drops below 80%.
+There are 43 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against fake Claude and OpenAI-compatible servers that speak their streaming protocols, webhook signatures, rate limiting, CORS for the static demo, identical Python and JavaScript search results on every evaluation question, the fact extractor, memory (recall, unverified notes, never touching the knowledge base, name-only recall across devices), attachments and Word/PowerPoint/Excel/PDF extraction, and guards that fail CI if Hit@5 drops below 80% or the auto-generated symbol questions drop below 90%.
 
 ## Design decisions
 
-- **BM25 instead of embeddings.** The corpus is small, about 600 chunks. Code questions use exact identifiers (`find_path_step`, `RBAC`), where keyword search is strong. BM25 runs in 1 ms with no model download, and it runs in the browser too. Cross-language recall, the usual weakness, is handled by the glossary and the query rewrite. The evaluation set is there to show when embeddings start to pay off.
-- **Standard library only.** The server, the model streaming clients and the search engine have no dependencies, so the project runs anywhere and is easy to read end to end.
+- **BM25 instead of embeddings.** The corpus is small, about 7,000 chunks. Code questions use exact identifiers (`find_path_step`, `RBAC`), where keyword search is strong. BM25 runs in 1 ms with no model download, and it runs in the browser too. Cross-language recall, the usual weakness, is handled by the glossary and the query rewrite. The evaluation set is there to show when embeddings start to pay off.
+- **Facts generated from code, not written by hand.** A hand-written FAQ goes stale on the next push and only covers the questions someone thought of. Cards extracted from the code cover every function and file and are rebuilt on every push.
+- **What visitors say is never knowledge.** The knowledge base is built only from the repos. Visitor claims go to a separate store, marked unverified, for a human to judge.
+- **Standard library only.** The server, the model streaming clients and the search engine have no dependencies (PDF reading is the one optional extra), so the project runs anywhere and is easy to read end to end.
 - **One engine, two runtimes.** The JavaScript port lets the demo work as a single static file. A parity test keeps both runtimes in lockstep.
 - **Grounded answers.** The prompt requires a citation for every claim about the projects and an honest "not in the sources". The UI makes each citation one click away from the real lines.
 
@@ -127,12 +138,15 @@ There are 26 tests. They cover the tokenizer, the chunker (line numbers must mat
 yakovllm/
   tokenizer.py    Hebrew + code tokenizer, glossary, repo aliases
   chunker.py      files -> chunks with line numbers
+  facts.py        code facts: symbol, file and project cards
+  memory.py       visitors, their questions and unverified notes
+  extract.py      text from Word, PowerPoint, Excel and PDF
   ingest.py       clone/read repos -> data/kb.json
   sync.py         incremental GitHub sync, live index swap
   search.py       BM25 index
   llm.py          streaming clients (Claude, Groq, Gemini, OpenAI-compatible), prompts, offline mode
   server.py       HTTP server: UI, /api/chat (SSE), /api/search, /api/sync, webhook
-web/              chat UI (vanilla JS): app.js, engine.js, markdown.js, style.css
+web/              chat UI (vanilla JS): app.js, engine.js, files.js, markdown.js, style.css, admin.html
 eval/             questions.json, run_eval.py
 tests/            pytest suite
 scripts/          build_demo.py (single-file demo), build_offline_kb.py
@@ -146,7 +160,9 @@ scripts/          build_demo.py (single-file demo), build_offline_kb.py
 | GET | `/api/health` | Mode, model, index size, sync status |
 | GET | `/api/repos` | Indexed repos with summaries and last push |
 | GET/POST | `/api/search?q=…&repo=…&k=…` | Raw search results with scores and matched terms |
-| POST | `/api/chat` | `{messages, repo?}` → Server-Sent Events: `meta` (sources), `delta` (text), `done` |
+| POST | `/api/chat` | `{messages, repo?, attachments?, visitor?, chat?}` → Server-Sent Events: `meta` (sources), `delta` (text), `done` |
+| POST | `/api/extract` | File bytes (name in `X-Filename`) → `{text}` for Word, PowerPoint, Excel, PDF |
+| GET | `/api/memory` | Visitors, questions and unverified notes (`Authorization: Bearer <ADMIN_TOKEN>`) |
 | POST | `/api/sync` | Check GitHub now (with `SYNC_TOKEN` set, needs `Authorization: Bearer <token>`) |
 | POST | `/api/webhook/github` | GitHub webhook (HMAC-SHA256 verified) |
 

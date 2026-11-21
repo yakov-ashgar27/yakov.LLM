@@ -23,6 +23,7 @@ import urllib.request
 from pathlib import Path
 
 from . import tokenizer
+from . import facts
 from .chunker import chunk_file
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -40,7 +41,7 @@ SKIP_DIRS = {".git", "node_modules", "dist", "build", ".venv", "venv", "__pycach
 SKIP_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"}
 JSON_KEEP = {"package.json", "manifest.webmanifest", "tsconfig.json"}
 MAX_BYTES = 200_000
-KB_VERSION = 3          # bump when chunks or metadata change shape: forces a full re-index
+KB_VERSION = 4          # bump when chunks or metadata change shape: forces a full re-index
 IGNORE_FILE = ".yakovllm-ignore"  # optional, in a repo's root: glob patterns of files to skip
 CODE_EXT = {".py", ".pyw", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".html", ".htm", ".css", ".sql", ".sh", ".bat",
             ".java", ".kt", ".c", ".h", ".cpp", ".hpp", ".cs", ".go", ".rs", ".swift", ".php", ".rb",
@@ -231,6 +232,12 @@ def ingest_repo(path: Path, fallback_name: str, extra: dict | None = None) -> tu
     for rel, content in files.items():
         chunks.extend(c.to_dict() for c in chunk_file(repo_key, rel, content))
     title, summary = describe(info["name"], info["owner"], files)
+    skip = lambda rel: any(x in SKIP_DIRS for x in rel.split("/")[:-1]) or any(fnmatch.fnmatch(rel, pat) for pat in ignore)
+    try:
+        fact_chunks, fact_summary = facts.build(repo_key, title, path, files, skip)
+    except Exception as e:  # facts are an extra; never let one odd file stop the index
+        log(f"  {repo_key}: facts skipped ({e})")
+        fact_chunks, fact_summary = [], {}
     langs: dict[str, int] = {}
     for rel in files:
         ext = os.path.splitext(rel)[1].lstrip(".") or rel.rsplit("/", 1)[-1]
@@ -238,11 +245,13 @@ def ingest_repo(path: Path, fallback_name: str, extra: dict | None = None) -> tu
     meta = {**info, "key": repo_key, "title": title, "summary": summary,
             "description": "", "homepage": "", "pushed_at": "",
             **(extra or {}),
-            "files": len(files), "chunks": len(chunks) + 1, "loc": line_counts(path),
+            "files": len(files), "chunks": len(chunks) + len(fact_chunks) + 1, "loc": line_counts(path),
+            "facts": fact_summary,
             "languages": dict(sorted(langs.items(), key=lambda kv: -kv[1])[:6])}
     if len(meta.get("description") or "") >= 20:  # the repo's own GitHub description says it best
         meta["summary"] = meta["description"]
     chunks.insert(0, overview_chunk(meta, files))
+    chunks.extend(fact_chunks)
     log(f"  {repo_key}: {len(files)} files -> {len(chunks)} chunks")
     return meta, chunks
 

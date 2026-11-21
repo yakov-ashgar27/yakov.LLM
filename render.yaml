@@ -24,3 +24,11 @@ services:
         value: "30"
       - key: WEBHOOK_SECRET
         generateValue: true
+      # Password of the memory page (/admin.html). Render generates it: Environment tab -> ADMIN_TOKEN.
+      - key: ADMIN_TOKEN
+        generateValue: true
+      # Keep the conversation memory across deploys in a PRIVATE repo (optional).
+      - key: MEMORY_REPO
+        value: yakov-ashgar27/yakov-llm-memory
+      - key: MEMORY_TOKEN
+        sync: false

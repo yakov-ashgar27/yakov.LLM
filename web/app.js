@@ -19,6 +19,11 @@
     retry: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg>',
     send: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
     stop: '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor"/></svg>',
+    edit: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
+    clip: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6L15 7.1"/></svg>',
+    file: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+    x: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    down: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>',
     trash: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   };
 
@@ -42,6 +47,13 @@
     },
   };
 
+  // A random id for this browser, so yakov.LLM can remember earlier conversations with the same person.
+  const VISITOR = (() => {
+    let v = store.pref('visitor');
+    if (!v) { v = 'v' + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now().toString(36) + Math.random().toString(36).slice(2)); store.pref('visitor', v); }
+    return v;
+  })();
+
   // ---------------------------------------------------------------- backends
   function parseSSE(buffer, onEvent) {
     let idx;
@@ -62,7 +74,7 @@
     kind: 'server',
     base: '',
     url(path) { return this.base + path; },
-    async init(health, base = '') { this.base = base; this.health = health; const r = await fetch(this.url('api/repos')).then((x) => x.json()); this.repos = r.repos; this.builtAt = r.built_at; },
+    async init(health, base = '') { this.base = base; this.health = health; const r = await fetch(this.url('api/repos')).then((x) => x.json()); this.repos = r.repos; this.builtAt = r.built_at; this.owner = r.owner; this.tokenizer = r.tokenizer || (BrowserBackend.kb || {}).tokenizer; },
     status() {
       const h = this.health;
       const live = h.mode !== 'offline';
@@ -73,10 +85,10 @@
       const r = await fetch(this.url('api/sync'), { method: 'POST' });
       if (!r.ok) throw new Error((await r.json()).error || 'sync failed');
     },
-    async chat({ messages, repo, signal, onMeta, onDelta }) {
+    async chat({ messages, repo, signal, onMeta, onDelta, attachments, chatId }) {
       const res = await fetch(this.url('api/chat'), {
         method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: messages.map(({ role, content }) => ({ role, content })), repo }),
+        body: JSON.stringify({ messages: messages.map(({ role, content }) => ({ role, content })), repo, attachments, visitor: VISITOR, chat: chatId }),
       });
       if (res.status === 429) throw new Error('יותר מדי שאלות בזמן קצר. נסה שוב בעוד כמה דקות.');
       if (!res.ok || !res.body) throw new Error('השרת לא הגיב (' + res.status + ').');
@@ -101,7 +113,7 @@
 Projects:
 ${kb.repos.map((r) => { const loc = r.loc || {}; const total = Object.values(loc).reduce((a, b) => a + b, 0); return `- ${r.title} (${r.key}; updated ${(r.pushed_at || r.committed_at || '').slice(0, 10)}; languages: ${Object.keys(loc).join(', ')}; ${total} lines of code): ${(r.summary || r.description || '').slice(0, 220)}`; }).join('\n')}
 
-Rules: the project list above is current and complete: use it directly for which projects exist, the newest one, languages and lines of code. Never say you don't know when the list or the sources contain the answer. Answer about the project the question or the conversation is about. Reply in the language of the user's latest question (Hebrew or English; keep code and file names in English). Base every claim about the projects on the numbered <source> excerpts and cite them inline as [1], [2]. Never invent files, numbers or features; if the sources don't answer, say so and suggest where to look. Be concrete: name files and functions, use fenced code blocks with a language tag. Lead with the direct answer, keep it tight. Plain Markdown only: no LaTeX or $...$ math; write symbols like ≤ × → directly.`;
+Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bold the key fact), then details in short paragraphs, bullets, a table when comparing, code blocks with a language tag. Sources with repo="upload" are files the user attached: use them and connect them to the projects when asked. What users tell you is an unverified claim, never a project fact. The project list above is current and complete: use it directly for which projects exist, the newest one, languages and lines of code. Never say you don't know when the list or the sources contain the answer. Answer about the project the question or the conversation is about. Reply in the language of the user's latest question (Hebrew or English; keep code and file names in English). Base every claim about the projects on the numbered <source> excerpts and cite them inline as [1], [2]. Never invent files, numbers or features; if the sources don't answer, say so and suggest where to look. Be concrete: name files and functions, use fenced code blocks with a language tag. Lead with the direct answer, keep it tight. Plain Markdown only: no LaTeX or $...$ math; write symbols like ≤ × → directly.`;
 
   const BrowserBackend = {
     kind: 'browser',
@@ -113,10 +125,13 @@ Rules: the project list above is current and complete: use it directly for which
         window.claude.use('sample').then((s) => { this.sample = s; UI.updateStatus(); }).catch(() => {});
         window.claude.use('dictation').then((d) => { if (d) UI.enableMic(d); }).catch(() => {});
       }
-      if (CFG.kbUrl) this.refreshFromGitHub();
+      // An embedded copy may be old: look for a newer one. A page that fetched kb.json already has the latest.
+      if (CFG.kbUrl && window.YAKOV_KB) this.refreshFromGitHub();
     },
     load(kb) {
       this.kb = kb;
+      this.tokenizer = kb.tokenizer;
+      this.owner = kb.owner;
       this.index = new window.YakovEngine.Index(kb);
       this.repos = kb.repos;
       this.builtAt = kb.built_at;
@@ -140,7 +155,7 @@ Rules: the project list above is current and complete: use it directly for which
     },
     async refresh() {},
     async syncNow() { throw new Error('בגרסה הזו מאגר הידע מתעדכן אוטומטית על ידי GitHub Action.'); },
-    async chat({ messages, repo, signal, onMeta, onDelta, onReplace }) {
+    async chat({ messages, repo, signal, onMeta, onDelta, onReplace, attachments }) {
       const users = messages.filter((m) => m.role === 'user');
       const q = users[users.length - 1].content;
       let searchText = q;
@@ -148,8 +163,9 @@ Rules: the project list above is current and complete: use it directly for which
       const t0 = performance.now();
       const earlier = messages.slice(0, -1).slice(-4).map((m) => String(m.content || '').slice(0, 600)).join(' ');
       const contextRepos = earlier ? this.index.tok.detectRepos(earlier) : [];
-      const hits = this.index.answerContext(searchText, { k: 8, repo, contextRepos });
-      const sources = hits.map((h, i) => ({ ...h.chunk, n: i + 1, score: +h.score.toFixed(3), terms: h.terms, url: this.index.githubUrl(h.chunk) }));
+      const hits = this.index.answerContext(searchText, { k: attachments && attachments.length ? 6 : 8, repo, contextRepos });
+      const files = (attachments || []).map((a) => ({ ...a, id: 'upload:' + a.name + ':' + a.start, repo: 'upload', path: a.name, title: '📎 ' + a.name, kind: 'upload', score: 0, terms: [], url: '' }));
+      const sources = files.concat(hits.map((h) => ({ ...h.chunk, score: +h.score.toFixed(3), terms: h.terms, url: this.index.githubUrl(h.chunk) }))).map((x, i) => ({ ...x, n: i + 1 }));
       onMeta({ sources, mode: this.sample ? 'claude' : 'offline', search_ms: +(performance.now() - t0).toFixed(1) });
       if (this.sample) {
         const ctx = sources.map((s) => `<source n="${s.n}" repo="${s.repo}" path="${s.path}" lines="${s.start}-${s.end}">\n${s.text}\n</source>`).join('\n\n');
@@ -179,9 +195,44 @@ Rules: the project list above is current and complete: use it directly for which
       const ext = (h.path.split('.').pop() || '').toLowerCase();
       const body = h.text.split('\n').slice(0, 16).join('\n');
       s += `**${h.repo} › ${h.path}** · שורות \u2066${h.start}–${h.end}\u2069 [${h.n}]\n\n`;
-      s += ['doc', 'page', 'overview'].includes(h.kind) ? '> ' + body.split('\n').join('\n> ') + '\n\n' : '```' + ext + '\n' + body + '\n```\n\n';
+      s += PROSE.has(h.kind) ? '> ' + body.split('\n').join('\n> ') + '\n\n' : '```' + ext + '\n' + body + '\n```\n\n';
     }
     onDelta(s + 'לחץ על מספר מקור כדי לראות את הקטע המלא.');
+  }
+
+  const PROSE = new Set(['doc', 'page', 'overview', 'facts', 'symbol', 'file', 'upload']);
+  const isEnglish = (t) => !HEBREW.test(t || '');
+  function srcLabel(s) {
+    if (s.kind === 'upload') return s.path.split('/').pop();
+    if (s.path === '(overview)') return 'overview';
+    if (s.path === '(project facts)') return 'project facts';
+    if (s.path === '(all projects)') return 'all projects';
+    if (s.kind === 'symbol') return s.title.split('›').pop().trim();
+    return s.path.split('/').pop();
+  }
+  function fmtSize(n) { return n < 1024 ? n + ' B' : n < 1048576 ? Math.round(n / 1024) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+
+  // Follow-up ideas under the latest answer, about the project the answer was about.
+  function followUps(chat, m) {
+    const users = chat.messages.filter((x) => x.role === 'user');
+    const lastQ = (users[users.length - 1] || {}).content || '';
+    const asked = new Set(users.map((u) => u.content.trim()));
+    const en = isEnglish(lastQ);
+    const repoKey = chat.repo || ((m.sources || []).find((s) => s.repo && s.repo !== 'upload' && !s.path.startsWith('(all')) || {}).repo;
+    const r = (UI.backend.repos || []).find((x) => x.key === repoKey);
+    const hasFiles = (m.sources || []).some((s) => s.kind === 'upload');
+    let ideas;
+    if (hasFiles) ideas = en ? ['Summarize the attached file in 5 bullets', 'Which of the projects best matches this file?', 'What is missing in the file compared to the projects?']
+      : ['סכם את הקובץ המצורף ב-5 נקודות', 'איזה מהפרויקטים הכי מתאים למה שכתוב בקובץ?', 'מה חסר בקובץ לעומת מה שיש בפרויקטים?'];
+    else if (r && r.key !== UI.backend.owner) {
+      const t = shortTitle(r);
+      ideas = en ? [`How do I run ${t} locally?`, `What was the hardest engineering problem in ${t}?`, `Which tests does ${t} have?`, `What does ${t} depend on?`, `Show me the main entry point of ${t}`]
+        : [`איך מריצים את ${t}?`, `מה האתגר ההנדסי הכי קשה ב-${t}?`, `אילו בדיקות יש ב-${t}?`, `על אילו ספריות ${t} מבוסס?`, `מה נקודת הכניסה הראשית של ${t}?`];
+    } else {
+      ideas = en ? ['Which project is the most impressive, and why?', 'What technologies does Yakov use most?', 'What is the newest project?']
+        : ['איזה פרויקט הכי מרשים, ולמה?', 'באילו טכנולוגיות יעקב משתמש הכי הרבה?', 'מה הפרויקט הכי חדש?'];
+    }
+    return ideas.filter((q) => !asked.has(q)).slice(0, 3);
   }
 
   // ---------------------------------------------------------------- UI
@@ -191,6 +242,8 @@ Rules: the project list above is current and complete: use it directly for which
     current: null,
     streaming: null,
     repo: '',
+    files: [],          // attachments of the open chat (kept in IndexedDB)
+    pendingFiles: [],   // attached before the chat has an id
 
     async start() {
       this.applyTheme(store.pref('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
@@ -211,6 +264,33 @@ Rules: the project list above is current and complete: use it directly for which
       ta.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); this.submit(); }
       });
+      ta.addEventListener('paste', (e) => {
+        const files = [...((e.clipboardData && e.clipboardData.files) || [])];
+        if (files.length) { e.preventDefault(); this.addFiles(files); }
+      });
+      $('#attach').addEventListener('click', (e) => { e.stopPropagation(); this.toggleAttachMenu(); });
+      $('#pick-files').addEventListener('click', () => { this.toggleAttachMenu(false); $('#file-input').click(); });
+      $('#pick-folder').addEventListener('click', () => { this.toggleAttachMenu(false); $('#folder-input').click(); });
+      for (const id of ['#file-input', '#folder-input']) $(id).addEventListener('change', (e) => { this.addFiles([...e.target.files]); e.target.value = ''; });
+      document.addEventListener('click', (e) => { if (!e.target.closest('#attach-menu')) this.toggleAttachMenu(false); });
+      $('#attachments').addEventListener('click', (e) => {
+        if (e.target.closest('[data-toggle-sent]')) { this.showSent = !this.showSent; this.renderFiles(); return; }
+        const rm = e.target.closest('[data-rm]');
+        if (rm) this.removeFile(rm.dataset.rm);
+        const open = e.target.closest('[data-open-file]');
+        if (open) { const f = this.allFiles().find((x) => x.name === open.dataset.openFile); if (f && f.text) this.openDrawer({ repo: '📎', path: f.name, start: 1, end: 1, kind: 'upload', text: f.text.slice(0, 60000), url: '' }); }
+      });
+      const main = $('.main');
+      let depth = 0;
+      main.addEventListener('dragenter', (e) => { if ([...(e.dataTransfer.types || [])].includes('Files')) { depth++; main.classList.add('dropping'); } });
+      main.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; main.classList.remove('dropping'); } });
+      main.addEventListener('dragover', (e) => e.preventDefault());
+      main.addEventListener('drop', async (e) => { e.preventDefault(); depth = 0; main.classList.remove('dropping'); this.addFiles(await window.YakovFiles.fromDrop(e.dataTransfer)); });
+      $('#chat-title').addEventListener('click', () => this.current && this.startRename(this.current.id, $('#chat-title')));
+      $('#chat-title').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === 'F2') && this.current) { e.preventDefault(); this.startRename(this.current.id, $('#chat-title')); } });
+      $('#export').addEventListener('click', () => this.exportChat());
+      $('#to-bottom').addEventListener('click', () => { $('#scroller').scrollTo({ top: 1e9, behavior: 'smooth' }); });
+      $('#scroller').addEventListener('scroll', () => { const s = $('#scroller'); $('#to-bottom').classList.toggle('show', s.scrollHeight - s.scrollTop - s.clientHeight > 400); }, { passive: true });
       $('#send').addEventListener('click', () => (this.streaming ? this.stop() : this.submit()));
       $('#new-chat').addEventListener('click', () => { this.newChat(); this.closeSidebar(); });
       $('#scope').addEventListener('change', (e) => { this.repo = e.target.value; if (this.current) { this.current.repo = this.repo; this.persist(); } });
@@ -223,7 +303,9 @@ Rules: the project list above is current and complete: use it directly for which
       $('#modal-close').addEventListener('click', () => this.closeModal());
       $('#sync-now').addEventListener('click', () => this.syncNow());
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') { this.closeDrawer(); this.closeModal(); this.closeSidebar(); }
+        if (e.key === 'Escape') { this.closeDrawer(); this.closeModal(); this.closeSidebar(); this.toggleAttachMenu(false); }
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); this.newChat(); }
+        if (e.key === '/' && !e.target.closest('input, textarea, [contenteditable="true"]')) { e.preventDefault(); $('#input').focus(); }
       });
       $('#thread').addEventListener('click', (e) => this.onThreadClick(e));
       $('#welcome').addEventListener('click', (e) => {
@@ -248,6 +330,9 @@ Rules: the project list above is current and complete: use it directly for which
     // ---- chats
     newChat() {
       this.current = null;
+      this.files = [];
+      this.pendingFiles = [];
+      this.renderFiles();
       this.setScope('');
       $('#thread').innerHTML = '';
       $('#welcome').hidden = false;
@@ -260,16 +345,22 @@ Rules: the project list above is current and complete: use it directly for which
       if (!c) return;
       this.current = c;
       this.setScope(c.repo || '');
+      this.files = [];
+      this.pendingFiles = [];
+      this.renderFiles();
+      if (c.fileCount) window.YakovFiles.DB.get(c.id).then((f) => { if (this.current === c) { this.files = f; this.renderFiles(); } });
       $('#welcome').hidden = true;
       $('#chat-title').textContent = c.title;
       const th = $('#thread');
       th.innerHTML = '';
-      c.messages.forEach((m, i) => th.appendChild(m.role === 'user' ? this.userEl(m) : this.botEl(m, i)));
+      c.messages.forEach((m, i) => th.appendChild(m.role === 'user' ? this.userEl(m, i) : this.botEl(m, i)));
+      this.renderFollowUps();
       this.renderHistory();
       store.pref('reopen', c.id);
       requestAnimationFrame(() => { $('#scroller').scrollTop = 1e9; });
     },
     remove(id) {
+      window.YakovFiles.DB.del(id);
       this.chats = this.chats.filter((x) => x.id !== id);
       store.mem = this.chats;
       store.save();
@@ -303,12 +394,115 @@ Rules: the project list above is current and complete: use it directly for which
           used.add(c.id);
           html += `<div class="chat-item" role="listitem" ${this.current && this.current.id === c.id ? 'aria-current="true"' : ''}>
             <button class="chat-open" data-id="${c.id}" style="all:unset;flex:1;min-width:0;cursor:pointer"><span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" dir="auto">${esc(c.title)}</span></button>
-            <button class="del" data-del="${c.id}" aria-label="מחיקת השיחה ${esc(c.title)}">${ICON.trash}</button></div>`;
+            <button class="del" data-ren="${c.id}" aria-label="שינוי שם השיחה ${esc(c.title)}" title="שינוי שם">${ICON.edit}</button>
+            <button class="del" data-del="${c.id}" aria-label="מחיקת השיחה ${esc(c.title)}" title="מחיקה">${ICON.trash}</button></div>`;
         }
       }
       box.innerHTML = html;
       box.querySelectorAll('[data-id]').forEach((b) => b.addEventListener('click', () => { this.open(b.dataset.id); this.closeSidebar(); }));
       box.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => this.remove(b.dataset.del)));
+      box.querySelectorAll('[data-ren]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); this.startRename(b.dataset.ren, b.closest('.chat-item').querySelector('.chat-open')); }));
+      box.querySelectorAll('.chat-open').forEach((b) => b.addEventListener('dblclick', (e) => { e.preventDefault(); this.startRename(b.dataset.id, b); }));
+    },
+
+    // Rename a chat in place: an input takes the title's place; Enter saves, Escape cancels.
+    startRename(id, el) {
+      const c = this.chats.find((x) => x.id === id);
+      if (!c || !el || el.dataset.renaming) return;
+      el.dataset.renaming = '1';
+      const input = document.createElement('input');
+      input.className = 'rename';
+      input.value = c.title;
+      input.maxLength = 80;
+      input.dir = 'auto';
+      input.setAttribute('aria-label', 'שם חדש לשיחה');
+      const host = el.closest('.chat-item') || el;
+      if (host !== el) host.classList.add('editing');
+      el.hidden = true;
+      el.after(input);
+      input.focus();
+      input.select();
+      let finished = false;
+      const done = (save) => {
+        if (finished) return;
+        finished = true;
+        const name = input.value.replace(/\s+/g, ' ').trim();
+        input.remove();
+        el.hidden = false;
+        delete el.dataset.renaming;
+        host.classList.remove('editing');
+        if (save && name && name !== c.title) {
+          c.title = name; c.renamed = true;
+          store.mem = this.chats; store.save();
+          toast('השם נשמר');
+        }
+        if (this.current && this.current.id === id) $('#chat-title').textContent = c.title;
+        this.renderHistory();
+      };
+      input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); done(true); } if (e.key === 'Escape') { e.preventDefault(); done(false); } });
+      input.addEventListener('click', (e) => e.stopPropagation());
+      input.addEventListener('blur', () => done(true));
+    },
+
+    // ---- attachments
+    allFiles() { return this.current ? this.files : this.pendingFiles; },
+    toggleAttachMenu(force) {
+      const m = $('#attach-menu');
+      const open = force === undefined ? m.hidden : force;
+      m.hidden = !open;
+      $('#attach').setAttribute('aria-expanded', String(open));
+    },
+    async addFiles(list) {
+      const Files = window.YakovFiles;
+      const target = this.allFiles();
+      const fresh = list.filter((f) => !Files.SKIP_DIRS.test((f.webkitRelativePath || f.name)) && !/(^|\/)\./.test(f.webkitRelativePath || f.name));
+      const ok = fresh.filter((f) => Files.supported(f.webkitRelativePath || f.name));
+      const skipped = fresh.length - ok.length;
+      if (!ok.length) { toast(skipped ? 'הקבצים האלה לא נתמכים. אפשר לצרף טקסט, קוד, Word, PowerPoint, Excel ו-PDF.' : 'לא נמצאו קבצים'); return; }
+      const room = Files.MAX_FILES - target.length;
+      const batch = ok.slice(0, Math.max(0, room));
+      if (ok.length > batch.length) toast(`אפשר עד ${Files.MAX_FILES} קבצים בשיחה`);
+      const base = this.backend.kind === 'server' ? this.backend.base : null;
+      const placeholders = batch.map((f) => ({ name: f.webkitRelativePath || f.name, size: f.size, status: 'reading' }));
+      for (const p of placeholders) { const i = target.findIndex((x) => x.name === p.name); if (i >= 0) target.splice(i, 1); target.push(p); }
+      this.renderFiles();
+      let done = 0, failed = 0;
+      const work = batch.map((f, i) => async () => {
+        try { Object.assign(placeholders[i], await Files.read(f, { apiBase: base }), { status: 'ready' }); done++; }
+        catch (e) { Object.assign(placeholders[i], { status: 'error', error: (e && e.message) || 'שגיאה' }); failed++; }
+        this.renderFiles();
+      });
+      for (let i = 0; i < work.length; i += 4) await Promise.all(work.slice(i, i + 4).map((w) => w()));
+      if (this.current && target === this.files) this.saveFiles();
+      toast(failed ? `צורפו ${done} קבצים, ${failed} לא נקראו` : (done === 1 ? 'הקובץ צורף. אפשר לשאול עליו.' : `צורפו ${done} קבצים. אפשר לשאול עליהם.`) + (skipped ? ` (${skipped} דולגו)` : ''));
+    },
+    removeFile(name) {
+      const t = this.allFiles();
+      const i = t.findIndex((x) => x.name === name);
+      if (i >= 0) t.splice(i, 1);
+      this.renderFiles();
+      if (this.current) this.saveFiles();
+    },
+    saveFiles() {
+      const ready = this.files.filter((f) => f.status === 'ready');
+      this.current.fileCount = ready.length;
+      window.YakovFiles.DB.put(this.current.id, ready.map((f) => ({ ...f })));
+      this.persist();
+    },
+    renderFiles() {
+      const files = this.allFiles();
+      const box = $('#attachments');
+      // Files already sent stay with the chat as sources: one compact pill; new ones show as chips.
+      const sent = files.filter((f) => f.sent && f.status === 'ready');
+      const fresh = files.filter((f) => !(f.sent && f.status === 'ready'));
+      const list = this.showSent ? files : fresh;
+      box.hidden = !files.length;
+      const shown = list.length > 12 ? list.slice(-11) : list;
+      const pill = sent.length ? `<button class="files-pill" data-toggle-sent aria-expanded="${!!this.showSent}">${ICON.clip}<span>${sent.length === 1 ? 'קובץ אחד' : sent.length + ' קבצים'} בשיחה</span></button>` : '';
+      box.innerHTML = pill + (list.length > 12 ? `<span class="att more">+${list.length - 11} קבצים</span>` : '') + shown.map((f) => `<span class="att ${f.status}" title="${esc(f.error || f.name)}">
+        <button class="att-open" data-open-file="${esc(f.name)}" ${f.status !== 'ready' ? 'disabled' : ''}>${f.status === 'reading' ? '<i class="spin"></i>' : ICON.file}
+        <span class="nm" dir="auto">${esc(f.name.split('/').pop())}</span><span class="sz" dir="${f.status === 'error' ? 'auto' : 'ltr'}">${f.status === 'error' ? esc(f.error) : fmtSize(f.size || 0)}</span></button>
+        <button class="att-x" data-rm="${esc(f.name)}" aria-label="הסרת ${esc(f.name)}">${ICON.x}</button></span>`).join('');
     },
 
     // ---- projects / welcome
@@ -367,11 +561,24 @@ Rules: the project list above is current and complete: use it directly for which
     },
 
     // ---- messages
-    userEl(m) {
+    userEl(m, idx) {
       const el = document.createElement('div');
       el.className = 'msg user';
-      el.innerHTML = `<div class="bubble" dir="auto">${esc(m.content)}</div>`;
+      el.dataset.idx = idx;
+      const files = (m.files || []).length ? `<div class="sent-files">${m.files.slice(0, 6).map((n) => `<span class="sent-file">${ICON.file}<span dir="auto">${esc(n.split('/').pop())}</span></span>`).join('')}${m.files.length > 6 ? `<span class="sent-file">+${m.files.length - 6}</span>` : ''}</div>` : '';
+      el.innerHTML = `<div class="user-col">${files}<div class="bubble" dir="auto">${esc(m.content)}</div>
+        <div class="user-tools"><button class="icon-btn" data-uact="copy" aria-label="העתקת ההודעה">${ICON.copy}</button><button class="icon-btn" data-uact="edit" aria-label="עריכת ההודעה ושליחה מחדש">${ICON.edit}</button></div></div>`;
       return el;
+    },
+    // Edit a sent question (like ChatGPT): the answers after it are replaced by a new one.
+    editUser(idx, el) {
+      if (this.streaming) return;
+      const m = this.current.messages[idx];
+      const bubble = $('.bubble', el);
+      bubble.outerHTML = `<div class="edit-box"><textarea dir="auto" rows="3">${esc(m.content)}</textarea><div class="edit-row"><button class="btn" data-uact="cancel">ביטול</button><button class="btn primary" data-uact="save">שליחה</button></div></div>`;
+      const ta = $('.edit-box textarea', el);
+      ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+      ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('[data-uact="save"]', el).click(); } if (e.key === 'Escape') $('[data-uact="cancel"]', el).click(); });
     },
     botEl(m, idx) {
       const el = document.createElement('div');
@@ -394,14 +601,50 @@ Rules: the project list above is current and complete: use it directly for which
       }
       const src = $('.sources', el);
       src.innerHTML = (m.sources || []).map((s, i) => `<button class="src-chip" data-src="${i}" title="${esc(s.repo + ' › ' + s.path)}">
-        <span class="n">${i + 1}</span><span class="p">${esc(s.path === '(overview)' ? 'overview' : s.path.split('/').pop())}</span><span class="r">${esc(s.repo)}</span></button>`).join('');
+        <span class="n">${i + 1}</span><span class="p" dir="auto">${s.kind === 'upload' ? '📎 ' : ''}${esc(srcLabel(s))}</span><span class="r">${esc(s.kind === 'upload' ? 'קובץ מצורף' : s.repo)}</span></button>`).join('');
       const tools = $('.msg-tools', el);
       tools.innerHTML = live ? '' : `<button class="icon-btn" data-act="copy" aria-label="העתקת התשובה">${ICON.copy}</button>
         <button class="icon-btn" data-act="retry" aria-label="תשובה חדשה">${ICON.retry}</button>
         ${m.meta ? `<span class="meta">${m.meta.sources} מקורות · חיפוש ${m.meta.search_ms} ms${m.meta.mode === 'offline' ? ' · ללא מודל' : ''}</span>` : ''}`;
     },
+    renderFollowUps() {
+      document.querySelectorAll('.followups').forEach((n) => n.remove());
+      const c = this.current;
+      if (!c || this.streaming) return;
+      const last = c.messages[c.messages.length - 1];
+      if (!last || last.role !== 'assistant' || last.error || !last.content) return;
+      const ideas = followUps(c, last);
+      const el = [...document.querySelectorAll('.msg.bot')].pop();
+      if (!ideas.length || !el) return;
+      const box = document.createElement('div');
+      box.className = 'followups';
+      box.innerHTML = ideas.map((q) => `<button class="starter" data-follow="${esc(q)}" dir="auto">${esc(q)}</button>`).join('');
+      $('.msg-tools', el).after(box);
+    },
 
     onThreadClick(e) {
+      const follow = e.target.closest('[data-follow]');
+      if (follow) { this.ask(follow.dataset.follow); return; }
+      const uEl = e.target.closest('.msg.user');
+      const uact = e.target.closest('[data-uact]');
+      if (uEl && uact && this.current) {
+        const idx = +uEl.dataset.idx;
+        const m = this.current.messages[idx];
+        if (uact.dataset.uact === 'copy') copyText(m.content).then(() => { uact.innerHTML = ICON.check; setTimeout(() => (uact.innerHTML = ICON.copy), 1500); });
+        if (uact.dataset.uact === 'edit') this.editUser(idx, uEl);
+        if (uact.dataset.uact === 'cancel') uEl.replaceWith(this.userEl(m, idx));
+        if (uact.dataset.uact === 'save') {
+          const text = $('.edit-box textarea', uEl).value.trim();
+          if (!text) return;
+          this.current.messages = this.current.messages.slice(0, idx).concat([{ ...m, content: text }]);
+          const th = $('#thread');
+          [...th.querySelectorAll('.msg')].slice(idx).forEach((n) => n.remove());
+          th.appendChild(this.userEl(this.current.messages[idx], idx));
+          this.persist();
+          this.run();
+        }
+        return;
+      }
       const msgEl = e.target.closest('.msg.bot');
       if (!msgEl || !this.current) return;
       const m = this.current.messages[+msgEl.dataset.idx];
@@ -427,15 +670,19 @@ Rules: the project list above is current and complete: use it directly for which
       if (!text || this.streaming) return;
       ta.value = '';
       this.autosize();
+      if (this.allFiles().some((f) => f.status === 'reading')) { toast('רגע, הקבצים עדיין נקראים…'); ta.value = text; return; }
       if (!this.current) {
-        this.current = { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: text.slice(0, 60), created: Date.now(), updated: Date.now(), repo: this.repo, messages: [] };
+        this.current = { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: chatTitle(text), created: Date.now(), updated: Date.now(), repo: this.repo, messages: [] };
         $('#welcome').hidden = true;
         $('#thread').innerHTML = '';
         $('#chat-title').textContent = this.current.title;
+        if (this.pendingFiles.length) { this.files = this.pendingFiles; this.pendingFiles = []; this.saveFiles(); }
       }
       const um = { role: 'user', content: text };
+      const fresh = this.files.filter((f) => f.status === 'ready' && !f.sent);
+      if (fresh.length) { um.files = fresh.map((f) => f.name); fresh.forEach((f) => (f.sent = true)); this.showSent = false; this.saveFiles(); this.renderFiles(); }
       this.current.messages.push(um);
-      $('#thread').appendChild(this.userEl(um));
+      $('#thread').appendChild(this.userEl(um, this.current.messages.length - 1));
       this.persist();
       this.renderHistory();
       this.run();
@@ -460,6 +707,13 @@ Rules: the project list above is current and complete: use it directly for which
       $('#thread').appendChild(el);
       this.scrollDown(true);
 
+      document.querySelectorAll('.followups').forEach((n) => n.remove());
+      const users = history.filter((m) => m.role === 'user');
+      const q = (users[users.length - 1] || {}).content || '';
+      const searchQ = users.length > 1 && q.split(/\s+/).length < 6 ? users[users.length - 2].content + ' ' + q : q;
+      const ready = this.files.filter((f) => f.status === 'ready');
+      const attachments = window.YakovFiles.pick(ready, searchQ, 6, this.backend.tokenizer)
+        .map((c) => ({ name: c.path, start: c.start, end: c.end, text: c.text }));
       const ctl = new AbortController();
       this.streaming = ctl;
       // Watchdog: if no text arrives for 110 s (the server tries up to three models), stop waiting.
@@ -473,7 +727,7 @@ Rules: the project list above is current and complete: use it directly for which
       const paint = () => { frame = 0; this.fillBot(el, bm, true); this.scrollDown(); };
       try {
         await this.backend.chat({
-          messages: history, repo: this.repo || null, signal: ctl.signal,
+          messages: history, repo: this.repo || null, signal: ctl.signal, attachments, chatId: chat.id,
           onMeta: (meta) => { bm.sources = meta.sources; bm.meta = { sources: meta.sources.length, search_ms: meta.search_ms, mode: meta.mode }; paint(); },
           onDelta: (t) => { lastText = Date.now(); bm.content += t; if (!frame) frame = requestAnimationFrame(paint); },
           onReplace: (t) => { lastText = Date.now(); bm.content = t; if (!frame) frame = requestAnimationFrame(paint); },
@@ -495,7 +749,26 @@ Rules: the project list above is current and complete: use it directly for which
         this.setSending(false);
         this.fillBot(el, bm, false);
         this.persist();
+        if (this.current === chat) this.renderFollowUps();
       }
+    },
+
+    exportChat() {
+      const c = this.current;
+      if (!c) { toast('אין עדיין שיחה לייצא'); return; }
+      let md = `# ${c.title}\n\n_yakov.LLM · ${new Date(c.created).toLocaleString('he-IL')}_\n\n`;
+      for (const m of c.messages) {
+        if (m.role === 'user') md += `## 🙋 ${m.content}\n\n`;
+        else {
+          md += (m.error ? `> ${m.error}` : m.content) + '\n\n';
+          if (m.sources && m.sources.length) md += m.sources.map((s, i) => `${i + 1}. ${s.repo} › ${s.path}${s.url ? ` (${s.url})` : ''}`).join('\n') + '\n\n';
+        }
+      }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+      a.download = (c.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'yakov-llm') + '.md';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     },
 
     stop() { if (this.streaming) this.streaming.abort(); },
@@ -517,10 +790,11 @@ Rules: the project list above is current and complete: use it directly for which
       if (!src) return;
       const d = $('#drawer');
       $('#d-repo').textContent = src.repo;
-      $('#d-path').textContent = src.path === '(overview)' ? 'project overview' : src.path;
-      $('#d-lines').textContent = src.path === '(overview)' ? '' : `lines ${src.start}–${src.end}`;
+      $('#d-repo').textContent = src.kind === 'upload' ? '📎 קובץ מצורף' : src.repo;
+      $('#d-path').textContent = src.path.startsWith('(') ? srcLabel(src) : src.path;
+      $('#d-lines').textContent = src.path.startsWith('(') || (src.kind === 'upload' && src.start === 1 && src.end === 1) ? '' : `${src.kind === 'upload' ? 'שורות' : 'lines'} ${src.start}–${src.end}`;
       const body = $('#d-body');
-      if (['doc', 'page', 'overview'].includes(src.kind)) {
+      if (PROSE.has(src.kind)) {
         body.innerHTML = `<div class="prose-src">${esc(src.text)}</div>`;
       } else {
         const ext = src.path.split('.').pop();
@@ -561,6 +835,13 @@ Rules: the project list above is current and complete: use it directly for which
   };
 
   // ---------------------------------------------------------------- helpers
+  // A short title from the first question, like the big chat apps do.
+  function chatTitle(text) {
+    let t = text.replace(/\s+/g, ' ').trim().replace(/^(?:היי|שלום|הי|hey|hi|hello)[,!.\s]+/i, '').replace(/^(?:תגיד(?: לי)?|תסביר(?: לי)?|ספר(?: לי)?|can you|could you|please)\s+/i, '');
+    t = t.replace(/[?!.]+$/, '');
+    if (t.length > 48) t = t.slice(0, 48).replace(/\s+\S*$/, '') + '…';
+    return t ? t[0].toUpperCase() + t.slice(1) : text.slice(0, 48);
+  }
   function shortTitle(r) {
     return (r.title || r.name).replace(/\s+[—-]\s+.*$/, '').replace(/^.*·\s*/, '');
   }

@@ -18,6 +18,10 @@ Environment:
     RATE_LIMIT          chat requests per IP per 10 minutes (default 30)
     CORS_ORIGINS        sites whose pages may call this API, comma-separated
                         (default https://yakov-ashgar27.github.io, the static demo)
+    ADMIN_TOKEN         password for GET /api/memory (visitors, their questions and unverified notes)
+    MEMORY_REPO         private GitHub repo "owner/name" that keeps the memory across deploys
+    MEMORY_TOKEN        GitHub token that can write MEMORY_REPO (fine-grained, Contents: read & write)
+    MEMORY_PATH         local memory file (default .cache/memory.json)
     HOST / PORT         default 0.0.0.0:8000
 """
 from __future__ import annotations
@@ -36,7 +40,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import llm, tokenizer
+from . import extract, llm, tokenizer
+from .memory import Memory
 from .search import Index
 from .sync import GitHubSync
 
@@ -84,13 +89,37 @@ class RateLimiter:
 
 
 LIMITER = RateLimiter(int(os.environ.get("RATE_LIMIT", "30")))
+MEMORY: Memory | None = None
+MAX_ATTACH = 8
+MAX_ATTACH_CHARS = 3500
+
+
+def memory() -> Memory:
+    global MEMORY
+    if MEMORY is None:
+        MEMORY = Memory.from_env()
+    return MEMORY
+
+
+def attachment_sources(items) -> list[dict]:
+    """Excerpts of files the user attached, already picked in the browser."""
+    out = []
+    for a in (items or [])[:MAX_ATTACH]:
+        if not isinstance(a, dict) or not a.get("text"):
+            continue
+        name = str(a.get("name") or "file")[:160]
+        out.append({"id": f"upload:{name}:{a.get('start', 1)}", "repo": "upload", "path": name,
+                    "start": int(a.get("start") or 1), "end": int(a.get("end") or 1),
+                    "title": f"📎 {name}", "kind": "upload", "text": str(a["text"])[:MAX_ATTACH_CHARS],
+                    "score": 0, "terms": [], "url": ""})
+    return out
 
 
 def source_payload(index: Index, hits) -> list[dict]:
     out = []
     for n, h in enumerate(hits, 1):
         d = h.to_dict(n)
-        d["url"] = index.github_url(h.chunk) if h.chunk["path"] != "(overview)" else index.repos.get(h.chunk["repo"], {}).get("url", "")
+        d["url"] = index.github_url(h.chunk)
         out.append(d)
     return out
 
@@ -127,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self._cors()
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Filename")
         self.send_header("Access-Control-Max-Age", "86400")
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -160,7 +189,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self.health())
         if p == "/api/repos":
             ix = STATE.index
-            return self._json({"repos": ix.kb["repos"], "built_at": ix.kb.get("built_at")})
+            return self._json({"repos": ix.kb["repos"], "built_at": ix.kb.get("built_at"), "owner": ix.kb.get("owner", ""),
+                               "tokenizer": ix.kb.get("tokenizer")})
+        if p == "/api/memory":
+            return self.memory_dump()
         if p == "/api/search":
             qs = parse_qs(url.query)
             return self._json(self.search(qs.get("q", [""])[0], qs.get("repo", [None])[0], int(qs.get("k", ["6"])[0])))
@@ -191,7 +223,8 @@ class Handler(BaseHTTPRequestHandler):
                 "provider": prov["label"] if prov else None, "model": prov["model"] if prov else None,
                 "owner": ix.kb.get("owner", ""), "owner_name": OWNER_NAME,
                 "repos": len(ix.repos), "chunks": ix.n, "built_at": ix.kb.get("built_at"),
-                "uptime_s": int(time.time() - STARTED), "sync": sync}
+                "uptime_s": int(time.time() - STARTED), "sync": sync, "memory": memory().stats(),
+                "features": ["attachments", "extract", "memory"]}
 
     def search(self, q: str, repo: str | None, k: int) -> dict:
         ix = STATE.index
@@ -210,11 +243,34 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.search(data.get("q", ""), data.get("repo"), int(data.get("k", 6))))
             if p == "/api/sync":
                 return self.sync_now()
+            if p == "/api/extract":
+                return self.extract_file()
             if p == "/api/webhook/github":
                 return self.webhook()
         except (ValueError, json.JSONDecodeError) as e:
             return self._json({"error": str(e)}, 400)
         self._json({"error": "not found"}, 404)
+
+    def memory_dump(self):
+        token = os.environ.get("ADMIN_TOKEN", "")
+        given = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+        if not token:
+            return self._json({"error": "ADMIN_TOKEN is not set on the server"}, 403)
+        if not hmac.compare_digest(given, token):
+            return self._json({"error": "unauthorized"}, 401)
+        return self._json(memory().export())
+
+    def extract_file(self):
+        if not LIMITER.allow("x:" + self._client_ip()):
+            return self._json({"error": "rate_limited"}, 429)
+        from urllib.parse import unquote
+        name = unquote(self.headers.get("X-Filename") or "file")
+        data = self._body(15_000_000)
+        try:
+            text = extract.extract(name, data)
+        except extract.ExtractError as e:
+            return self._json({"error": str(e)}, 422)
+        return self._json({"name": name, "chars": len(text), "text": text})
 
     def sync_now(self):
         token = os.environ.get("SYNC_TOKEN")
@@ -246,6 +302,9 @@ class Handler(BaseHTTPRequestHandler):
         data = json.loads(self._body() or b"{}")
         messages = data.get("messages") or []
         repo = data.get("repo") or None
+        visitor = str(data.get("visitor") or "")
+        chat_id = str(data.get("chat") or "")[:64]
+        attachments = attachment_sources(data.get("attachments"))
         question, search_text = retrieval_query(messages)
         if not question:
             return self._json({"error": "empty question"}, 400)
@@ -270,13 +329,25 @@ class Handler(BaseHTTPRequestHandler):
             # Projects the conversation was already about: "what was hardest there?" stays on topic.
             earlier = " ".join(str(m.get("content", ""))[:600] for m in messages[:-1][-4:])
             context = ix.detect(earlier) if earlier else []
-            hits = ix.answer_context(search_text, k=8, repo=repo, extra_terms=keywords, context_repos=context)
-            sources = source_payload(ix, hits)
+            hits = ix.answer_context(search_text, k=8 if not attachments else 6, repo=repo, extra_terms=keywords,
+                                     context_repos=context)
+            sources = attachments + source_payload(ix, hits)
+            for n, src in enumerate(sources, 1):
+                src["n"] = n
+            projects = [repo] if repo else (ix.detect(question) or context)[:3]
+            mem = memory()
+            titles = {r["key"]: r.get("title") or r["key"] for r in ix.kb["repos"]}
+            user_text = "\n".join(str(m.get("content", ""))[:500] for m in messages if m.get("role") == "user")
+            recall = mem.context(visitor, chat_id, user_text, titles) if visitor else ""
+            if visitor:
+                mem.record(visitor, chat_id, question, projects)
             send("meta", {"sources": sources, "keywords": keywords, "mode": "llm" if llm.has_key() else "offline",
                           "search_ms": round((time.perf_counter() - t0) * 1000, 1)})
             if llm.has_key():
                 system = llm.SYSTEM_PROMPT.format(owner_name=OWNER_NAME, owner=ix.kb.get("owner", ""),
                                                   projects=llm.project_list(ix.kb["repos"]))
+                if recall:
+                    system += "\n\n<visitor_memory>\n" + recall + "\n</visitor_memory>"
                 stream = llm.stream_answer(system, llm.build_messages(messages, sources))
             else:
                 stream = llm.offline_answer(question, sources)

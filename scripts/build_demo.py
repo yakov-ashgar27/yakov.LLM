@@ -38,15 +38,16 @@ def main() -> None:
         html = re.sub(r'\s*<link rel="manifest"[^>]*>|\s*<link rel="apple-touch-icon"[^>]*>', "", html)
         html = re.sub(r"kbUrl: '[^']*'", "kbUrl: ''", html)
         html = html.replace("window.YAKOV_CONFIG = {", "window.YAKOV_EMBEDDED = true;\n    window.YAKOV_CONFIG = {", 1)
-    kb_script = "<script>window.YAKOV_KB = " + kb.replace("</", "<\\/") + ";</script>\n"
-    html = html.replace("</head>", kb_script + "</head>", 1)
+    if embedded:  # a sandboxed host can't fetch kb.json next to the page: put it inside
+        kb_script = "<script>window.YAKOV_KB = " + kb.replace("</", "<\\/") + ";</script>\n"
+        html = html.replace("</head>", kb_script + "</head>", 1)
 
     DIST.mkdir(exist_ok=True)
     (DIST / "index.html").write_text(html, encoding="utf-8")
     (DIST / "kb.json").write_text(kb, encoding="utf-8")
     if not embedded:  # installable app (PWA) files
         for name in ("manifest.webmanifest", "sw.js", "icon.svg", "icon-192.png", "icon-512.png",
-                     "icon-maskable-512.png", "apple-touch-icon.png"):
+                     "icon-maskable-512.png", "apple-touch-icon.png", "admin.html", "style.css"):
             (DIST / name).write_bytes((WEB / name).read_bytes())
     print(f"dist/index.html · {len(html.encode()) / 1e6:.1f} MB")
 

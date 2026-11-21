@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yakov.LLM · זיכרון</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="style.css">
+<style>
+  body { overflow: auto; height: auto; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 18px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } .sub { color: var(--muted); margin: 0 0 20px; }
+  form { display: flex; gap: 8px; margin-bottom: 20px; }
+  input { flex: 1; font: 15px var(--font); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--raise); color: var(--ink); }
+  .person { border: 1px solid var(--line); border-radius: 14px; background: var(--raise); padding: 14px 16px; margin: 12px 0; }
+  .person h2 { font-size: 16px; margin: 0 0 4px; } .meta { color: var(--muted); font-size: 13px; }
+  .note { border-inline-start: 3px solid var(--accent); padding: 4px 10px; margin: 8px 0; background: var(--accent-soft); border-radius: 6px; }
+  .note.fix { border-color: var(--danger); }
+  details { margin-top: 8px; } summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
+  .q { font-size: 14px; margin: 4px 0; } .tag { font-size: 11.5px; color: var(--faint); }
+  .stats { display: flex; gap: 18px; color: var(--muted); font-size: 14px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>מה אנשים אמרו ל-yakov.LLM</h1>
+  <p class="sub">כל מבקר, השמות שנתן, על אילו פרויקטים שאל ומה טען. הטענות לא מאומתות ולא נכנסות לידע על הפרויקטים.</p>
+  <form id="f"><input id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="current-password"><button class="btn primary">הצג</button></form>
+  <div id="out"></div>
+</div>
+<script>
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const base = location.hostname.endsWith('github.io') ? 'https://yakov-llm.onrender.com/' : '';
+async function load(token) {
+  const r = await fetch(base + 'api/memory', { headers: { Authorization: 'Bearer ' + token } });
+  const out = document.getElementById('out');
+  if (!r.ok) { out.innerHTML = `<div class="error-box">${r.status === 401 ? 'סיסמה שגויה' : 'השרת לא החזיר נתונים (' + r.status + ')'}</div>`; return; }
+  sessionStorage.setItem('yl-admin', token);
+  const d = await r.json();
+  out.innerHTML = `<div class="stats"><span>${d.visitors} מבקרים</span><span>${d.notes} הערות</span><span>${d.storage.remote ? 'נשמר ב-GitHub' : 'נשמר על השרת בלבד (נמחק בעדכון)'}</span></div>` +
+    d.people.map((p) => `<div class="person"><h2 dir="auto">${p.names.length ? esc(p.names.join(', ')) : 'מבקר אנונימי'}</h2>
+      <div class="meta">${p.first === p.last ? p.first : p.first + ' – ' + p.last} · ${p.conversations} שיחות · ${Object.keys(p.projects).map(esc).join(', ') || 'בלי פרויקט מסוים'}</div>
+      ${p.notes.map((n) => `<div class="note ${n.correction ? 'fix' : ''}" dir="auto">${esc(n.text)} <span class="tag">${n.day}${n.correction ? ' · תיקון' : ''}</span></div>`).join('')}
+      <details><summary>${p.questions.length} הודעות אחרונות</summary>${p.questions.map((q) => `<div class="q" dir="auto">${esc(q.text)} <span class="tag">${q.day}</span></div>`).join('')}</details></div>`).join('');
+}
+document.getElementById('f').addEventListener('submit', (e) => { e.preventDefault(); load(document.getElementById('token').value.trim()); });
+const saved = sessionStorage.getItem('yl-admin'); if (saved) load(saved);
+</script>
+</body>
+</html>

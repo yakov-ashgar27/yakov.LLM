@@ -7,6 +7,7 @@
 
   const K1 = 1.2, B = 0.75, META_WEIGHT = 3, REPO_BOOST = 3.0, CONTEXT_BOOST = 1.8, README_BOOST = 1.15;
   const TEST_PENALTY = 0.8, MAX_PER_FILE = 2;
+  const CARD_KINDS = new Set(['symbol', 'file']);
   const TEST_WORDS = new Set(['test', 'tests', 'pytest', 'vitest', 'בדיקה', 'בדיקות', 'e2e', 'playwright']);
 
   function makeTokenizer(cfg) {
@@ -130,7 +131,7 @@
       for (const t of terms) q.set(t, (q.get(t) || 0) + 1);
       const focus = new Set(repo ? [] : this.tok.detectRepos(query));
       const context = new Set(repo || focus.size ? [] : (contextRepos || []));
-      const wantsTests = terms.some((t) => TEST_WORDS.has(t));
+      const wantsTests = terms.some((t) => TEST_WORDS.has(t)) || query.toLowerCase().includes('test_');
       const scores = new Map();
       const matched = new Map();
       for (const [term, qtf] of q) {
@@ -159,7 +160,7 @@
       const perFile = new Map();
       for (const [s, i] of ranked) {
         const c = this.chunks[i];
-        const key = c.repo + '\u0000' + c.path;
+        const key = c.repo + '\u0000' + c.path + '\u0000' + (CARD_KINDS.has(c.kind) ? 'card' : '');
         const n = perFile.get(key) || 0;
         if (n >= MAX_PER_FILE) continue;
         perFile.set(key, n + 1);
@@ -184,6 +185,7 @@
       if (targets.length) {
         for (const t of targets.slice(0, 2)) {
           wanted.push(`${t}:(overview):1-1`);
+          wanted.push(`${t}:(project facts):1`);
           const readme = this.chunks.filter((c) => c.repo === t && c.path.toLowerCase() === 'readme.md').sort((a, b) => a.start - b.start);
           for (const c of readme.slice(0, 2)) wanted.push(c.id);
         }
@@ -201,7 +203,7 @@
     githubUrl(c) {
       const r = this.repos[c.repo] || {};
       if (!r.url) return '';
-      if (c.path === '(overview)') return r.url;
+      if (c.path.startsWith('(')) return r.url;
       return `${r.url}/blob/${r.branch || 'main'}/${c.path}#L${c.start}-L${c.end}`;
     }
   }

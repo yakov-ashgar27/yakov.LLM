@@ -30,6 +30,8 @@ README_BOOST = 1.15
 TEST_PENALTY = 0.8    # test files echo the code's words; prefer the code unless tests are asked about
 TEST_WORDS = {"test", "tests", "pytest", "vitest", "בדיקה", "בדיקות", "e2e", "playwright"}
 MAX_PER_FILE = 2
+CARD_KINDS = {"symbol", "file"}   # fact cards about a file get their own per-file budget beside its code
+FACTS_PATH = "(project facts)"
 
 
 @dataclass
@@ -93,7 +95,7 @@ class Index:
         q = Counter(terms)
         focus = set(self.detect(query)) if not repo else set()
         context = set(context_repos or []) if not repo and not focus else set()
-        wants_tests = bool(TEST_WORDS & set(terms))
+        wants_tests = bool(TEST_WORDS & set(terms)) or "test_" in query.lower()
         scores: dict[int, float] = defaultdict(float)
         matched: dict[int, list[str]] = defaultdict(list)
         for term, qtf in q.items():
@@ -124,7 +126,7 @@ class Index:
         per_file: Counter = Counter()
         for s, i in ranked:
             c = self.chunks[i]
-            key = (c["repo"], c["path"])
+            key = (c["repo"], c["path"], c["kind"] in CARD_KINDS)
             if per_file[key] >= MAX_PER_FILE:
                 continue
             per_file[key] += 1
@@ -156,6 +158,7 @@ class Index:
         if targets:
             for t in targets[:2]:
                 wanted.append(f"{t}:(overview):1-1")
+                wanted.append(f"{t}:{FACTS_PATH}:1")
                 readme = sorted((c for c in self.chunks if c["repo"] == t and c["path"].lower() == "readme.md"),
                                 key=lambda c: c["start"])
                 wanted += [c["id"] for c in readme[:2]]
@@ -174,4 +177,6 @@ class Index:
         r = self.repos.get(chunk["repo"], {})
         if not r.get("url"):
             return ""
+        if chunk["path"].startswith("("):
+            return r["url"]
         return f'{r["url"]}/blob/{r.get("branch") or "main"}/{chunk["path"]}#L{chunk["start"]}-L{chunk["end"]}'

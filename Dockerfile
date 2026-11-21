@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 # git is used to pull repositories when GitHub sync finds a new or changed project
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir "pypdf>=4"
 WORKDIR /app
 COPY yakovllm ./yakovllm
 COPY web ./web

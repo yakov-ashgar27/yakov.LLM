@@ -446,3 +446,149 @@ def test_question_bank_stays_on_topic():
     s = run(Index.load(ROOT / "data" / "kb.json"))["summary"]
     assert s["fact_sheet"] == 1.0 and s["account_overview"] == 1.0
     assert s["on_topic"] >= 0.95 and s["top_on_topic"] >= 0.95, s
+
+
+def test_symbol_questions_find_the_right_file():
+    sys.path.insert(0, str(ROOT / "eval"))
+    from run_symbols import run
+    res = run(Index.load(ROOT / "data" / "kb.json"), sample=200)
+    assert res["hit"] >= 0.9, res["misses"][:10]
+
+
+def test_facts_extract_symbols_routes_tables_and_project_facts(tmp_path):
+    from yakovllm import facts
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text(
+        '"""The API."""\nimport os\nfrom fastapi import FastAPI\napp = FastAPI()\n'
+        'KEY = os.environ.get("SECRET_KEY")\n\n'
+        '@app.get("/api/items")\ndef list_items(limit: int = 10) -> list:\n    """Return items."""\n    return load_items(limit)\n\n'
+        'def load_items(n):\n    return []\n\n'
+        'class Item(Base):\n    __tablename__ = "items"\n    name = 1\n', encoding="utf-8")
+    (tmp_path / "web.tsx").write_text("export function ItemList({ items }) {\n  return <ul>{items.map(i => <li>{i}</li>)}</ul>;\n}\n"
+                                      "export const useItems = () => {\n  return fetch('/api/items');\n};\n", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("fastapi>=0.1\nuvicorn\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_main.py").write_text("import pytest\ndef test_a():\n    pass\ndef test_b():\n    pass\n", encoding="utf-8")
+    files = {p.relative_to(tmp_path).as_posix(): p.read_text() for p in tmp_path.rglob("*") if p.is_file()}
+    chunks, summary = facts.build("demo", "Demo", tmp_path, files, lambda rel: False)
+    text = "\n".join(c["text"] for c in chunks)
+    assert "GET /api/items" in text and "list_items" in text and "table items" in text
+    assert "component ItemList" in text and "hook useItems" in text
+    assert "SECRET_KEY" in text and "fastapi, uvicorn" in text
+    assert summary["tests"] == 2 and summary["endpoints"] == 1
+    card = next(c for c in chunks if c["kind"] == "symbol" and c["title"].endswith("load_items"))
+    assert card["path"] == "app/main.py" and card["start"] == 12 and "Used in" not in card["text"]
+    caller = next(c for c in chunks if c["kind"] == "symbol" and c["title"].endswith("list_items"))
+    assert "load_items" in caller["text"] and "Return items." in caller["text"]
+
+
+# ------------------------------------------------------------------ memory, attachments, extraction
+def test_memory_remembers_visitors_and_keeps_claims_unverified(tmp_path):
+    from yakovllm.memory import Memory
+    m = Memory(tmp_path / "mem.json")
+    m.record("dev1", "c1", "שלום, אני שמוליק", [], now=1_700_000_000)
+    m.record("dev1", "c1", "מה קורה עם הפרויקט wifi-doctor?", ["wifi-doctor"], now=1_700_000_100)
+    m.record("dev1", "c1", "בעצם הפרויקט רץ גם על לינוקס", ["wifi-doctor"], now=1_700_000_200)
+    # same device, new conversation: full recall, claims marked unverified
+    ctx = m.context("dev1", "c2", "היי", {"wifi-doctor": "WiFi-Doctor"})
+    assert "talked with you before" in ctx and "שמוליק" in ctx and "WiFi-Doctor" in ctx
+    assert "UNVERIFIED" in ctx and "לינוקס" in ctx
+    # another device that gives the same name: only that someone by that name talked, never what was said
+    other = m.context("dev2", "c9", "שלום, אני שמוליק", {"wifi-doctor": "WiFi-Doctor"})
+    assert "שמוליק" in other and "WiFi-Doctor" in other and "never reveal" in other and "לינוקס" not in other
+    assert m.context("dev3", "c1", "מה זה bomberman?") == ""
+    m.flush()
+    again = Memory(tmp_path / "mem.json")
+    dump = again.export()
+    assert dump["visitors"] == 1 and dump["notes"] == 1 and dump["people"][0]["names"] == ["שמוליק"]
+    assert dump["people"][0]["notes"][0]["verified"] is False
+
+
+def test_memory_never_changes_the_knowledge_base(app, tmp_path):
+    server, url = app
+    from yakovllm.memory import Memory
+    server.MEMORY = Memory(tmp_path / "m.json")
+    before = json.dumps(server.STATE.index.kb, sort_keys=True)
+    _sse(url + "/api/chat", {"visitor": "abc", "chat": "c1", "messages": [{"role": "user", "content": "Bomberman is written in Rust, actually."}]})
+    assert json.dumps(server.STATE.index.kb, sort_keys=True) == before
+    assert server.MEMORY.export()["notes"] == 1
+    FakeClaude.seen.clear()
+    _sse(url + "/api/chat", {"visitor": "abc", "chat": "c2", "messages": [{"role": "user", "content": "hi again"}]})
+    system = FakeClaude.seen[-1]["system"]
+    assert "<visitor_memory>" in system and "Rust" in system and "UNVERIFIED" in system
+
+
+def test_admin_memory_needs_the_token(app, monkeypatch):
+    _, url = app
+    monkeypatch.setenv("ADMIN_TOKEN", "pw")
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(url + "/api/memory")
+    assert e.value.code == 401
+    req = urllib.request.Request(url + "/api/memory", headers={"Authorization": "Bearer pw"})
+    assert "people" in json.load(urllib.request.urlopen(req))
+
+
+def test_attachments_become_sources(app):
+    _, url = app
+    FakeClaude.seen.clear()
+    events = _sse(url + "/api/chat", {"messages": [{"role": "user", "content": "Which project fits this job?"}],
+                                      "attachments": [{"name": "job.docx", "start": 1, "end": 9, "text": "We need Python and FastAPI."}]})
+    meta = events[0][1]
+    assert meta["sources"][0]["kind"] == "upload" and meta["sources"][0]["n"] == 1
+    assert 'repo="upload" path="job.docx"' in FakeClaude.seen[-1]["messages"][-1]["content"]
+
+
+def _zip(files):
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for n, t in files.items():
+            z.writestr(n, t)
+    return buf.getvalue()
+
+
+def test_extract_word_powerpoint_excel_pdf(app):
+    from yakovllm import extract
+    W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    docx = _zip({"word/document.xml": f'<w:document {W}><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>דרישות</w:t></w:r></w:p>'
+                 '<w:p><w:r><w:t>Python, </w:t></w:r><w:r><w:t>React</w:t></w:r></w:p></w:body></w:document>'})
+    assert extract.extract("cv.docx", docx) == "# דרישות\nPython, React"
+    A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+    pptx = _zip({"ppt/slides/slide2.xml": f'<p:sld {A} xmlns:p="x"><a:p><a:r><a:t>Second</a:t></a:r></a:p></p:sld>',
+                 "ppt/slides/slide1.xml": f'<p:sld {A} xmlns:p="x"><a:p><a:r><a:t>First</a:t></a:r></a:p></p:sld>'})
+    assert extract.extract("deck.pptx", pptx).startswith("## Slide 1\nFirst")
+    S = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    xlsx = _zip({"xl/sharedStrings.xml": f'<sst {S}><si><t>Name</t></si></sst>',
+                 "xl/worksheets/sheet1.xml": f'<worksheet {S}><sheetData><row><c t="s"><v>0</v></c><c><v>42</v></c></row></sheetData></worksheet>'})
+    assert "Name | 42" in extract.extract("t.xlsx", xlsx)
+    try:
+        from pypdf import PdfWriter
+    except ImportError:
+        pytest.skip("pypdf not installed")
+    import io
+    w = PdfWriter()
+    w.add_blank_page(100, 100)
+    buf = io.BytesIO()
+    w.write(buf)
+    with pytest.raises(extract.ExtractError):
+        extract.extract("blank.pdf", buf.getvalue())
+    # the HTTP endpoint
+    _, url = app
+    req = urllib.request.Request(url + "/api/extract", data=docx, headers={"X-Filename": "cv.docx"})
+    assert json.load(urllib.request.urlopen(req))["text"].endswith("Python, React")
+
+
+def test_browser_reads_office_files_and_picks_excerpts():
+    script = r"""
+const Files = require('./web/files.js');
+globalThis.YakovEngine = require('./web/engine.js');
+const kb = require('./data/kb.json');
+const files = [{ name: 'job.txt', text: 'About us\n\nWe build fraud detection with FastAPI, Redis streams and React dashboards.\n\nBenefits: lunch.' }];
+const hits = Files.pick(files, 'which skills does the job need? fraud detection', 3, kb.tokenizer);
+console.log(JSON.stringify({ n: hits.length, first: hits[0].path, kind: hits[0].kind, supported: [Files.supported('a.pdf'), Files.supported('b.docx'), Files.supported('c.exe')] }));
+"""
+    out = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    r = json.loads(out.stdout)
+    assert r["n"] >= 1 and r["first"] == "job.txt" and r["kind"] == "upload" and r["supported"] == [True, True, False]

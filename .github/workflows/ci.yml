@@ -19,3 +19,4 @@ jobs:
         run: |
           python eval/run_eval.py | tee -a "$GITHUB_STEP_SUMMARY"
           python eval/run_bank.py | tee -a "$GITHUB_STEP_SUMMARY"
+          python eval/run_symbols.py --sample 600 | tee -a "$GITHUB_STEP_SUMMARY"
