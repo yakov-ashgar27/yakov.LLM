@@ -40,6 +40,7 @@ async function load(token) {
     d.people.map((p) => `<div class="person"><h2 dir="auto">${p.names.length ? esc(p.names.join(', ')) : 'מבקר אנונימי'}</h2>
       <div class="meta">${p.first === p.last ? p.first : p.first + ' – ' + p.last} · ${p.conversations} שיחות · ${Object.keys(p.projects).map(esc).join(', ') || 'בלי פרויקט מסוים'}</div>
       ${p.notes.map((n) => `<div class="note ${n.correction ? 'fix' : ''}" dir="auto">${esc(n.text)} <span class="tag">${n.day}${n.correction ? ' · תיקון' : ''}</span></div>`).join('')}
+      ${(p.feedback || []).map((f) => `<div class="q" dir="auto">${f.vote === 'up' ? '👍' : '👎'} ${esc(f.question)} <span class="tag">${f.day}</span></div>`).join('')}
       <details><summary>${p.questions.length} הודעות אחרונות</summary>${p.questions.map((q) => `<div class="q" dir="auto">${esc(q.text)} <span class="tag">${q.day}</span></div>`).join('')}</details></div>`).join('');
 }
 document.getElementById('f').addEventListener('submit', (e) => { e.preventDefault(); load(document.getElementById('token').value.trim()); });

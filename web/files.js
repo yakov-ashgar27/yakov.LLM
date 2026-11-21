@@ -17,7 +17,7 @@
   const CHUNK = 1400;
 
   const ext = (name) => { const n = name.toLowerCase(); const b = n.split('/').pop(); return b.includes('.') ? b.split('.').pop() : b; };
-  const kind = (name) => { const e = ext(name); return e === 'pdf' ? 'pdf' : OFFICE_EXT.has(e) ? 'office' : TEXT_EXT.has(e) ? 'text' : 'other'; };
+  const kind = (name) => { const e = ext(name); return e === 'pdf' ? 'pdf' : e === 'zip' ? 'zip' : OFFICE_EXT.has(e) ? 'office' : TEXT_EXT.has(e) ? 'text' : 'other'; };
   const supported = (name) => kind(name) !== 'other';
 
   // ------------------------------------------------------------ zip (Office files)
@@ -186,7 +186,19 @@
     return out;
   }
 
-  const api = { read, pick, chunks, supported, kind, DB, fromDrop, MAX_FILES, SKIP_DIRS };
+  /** A .zip opened in the browser: its readable files as File objects (folders kept in the names). */
+  async function expandZip(file) {
+    const buf = await file.arrayBuffer();
+    const base = file.name.replace(/\.zip$/i, '') + '/';
+    const files = await unzip(buf, (n) => !n.endsWith('/') && !SKIP_DIRS.test(n) && !/(^|\/)(\.|__MACOSX)/.test(n) && kind(n) === 'text');
+    return Object.entries(files).slice(0, MAX_FILES).map(([n, text]) => {
+      const f = new File([text], n.split('/').pop(), { type: 'text/plain' });
+      try { Object.defineProperty(f, 'webkitRelativePath', { value: base + n }); } catch { /* read-only */ }
+      return f;
+    });
+  }
+
+  const api = { read, pick, expandZip, chunks, supported, kind, DB, fromDrop, MAX_FILES, SKIP_DIRS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.YakovFiles = api;
 })(typeof window !== 'undefined' ? window : globalThis);

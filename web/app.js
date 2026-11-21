@@ -19,6 +19,12 @@
     retry: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg>',
     send: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
     stop: '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor"/></svg>',
+    pin: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5M9 3h6l-1 6 4 4H6l4-4z"/></svg>',
+    more: '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
+    save: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>',
+    up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10v11H4V10zM7 10l4-8a2.5 2.5 0 0 1 2.5 2.5V9h5.6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 17.7 21H7"/></svg>',
+    down2: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14V3h3v11zM17 14l-4 8a2.5 2.5 0 0 1-2.5-2.5V15H4.9a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 6.3 3H17"/></svg>',
+    speak: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
     edit: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
     clip: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6L15 7.1"/></svg>',
     file: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
@@ -46,6 +52,32 @@
       } catch { return null; }
     },
   };
+
+  // The user's profile and preferences, kept on this device.
+  const Profile = {
+    get() { try { return Object.assign({ name: '', avatar: '', lang: '', size: 'm', enterSends: true, instructions: '' }, JSON.parse(store.pref('profile') || '{}')); } catch { return { name: '', avatar: '', lang: '', size: 'm', enterSends: true }; } },
+    set(patch) { const p = Object.assign(this.get(), patch); store.pref('profile', JSON.stringify(p)); return p; },
+  };
+  function avatarHTML(p) {
+    if (p.avatar) return `<img src="${esc(p.avatar)}" alt="">`;
+    return p.name ? esc([...p.name.trim()][0].toUpperCase()) : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>';
+  }
+  // Shrink a chosen photo to a small square, so it fits in local storage.
+  function shrinkImage(file, size = 160) {
+    return new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = c.height = size;
+        const s = Math.min(img.width, img.height);
+        c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+        URL.revokeObjectURL(img.src);
+        res(c.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = () => rej(new Error('לא הצלחתי לקרוא את התמונה'));
+      img.src = URL.createObjectURL(file);
+    });
+  }
 
   // A random id for this browser, so yakov.LLM can remember earlier conversations with the same person.
   const VISITOR = (() => {
@@ -85,10 +117,10 @@
       const r = await fetch(this.url('api/sync'), { method: 'POST' });
       if (!r.ok) throw new Error((await r.json()).error || 'sync failed');
     },
-    async chat({ messages, repo, signal, onMeta, onDelta, attachments, chatId }) {
+    async chat({ messages, repo, signal, onMeta, onDelta, attachments, chatId, temporary }) {
       const res = await fetch(this.url('api/chat'), {
         method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: messages.map(({ role, content }) => ({ role, content })), repo, attachments, visitor: VISITOR, chat: chatId }),
+        body: JSON.stringify({ messages: messages.map(({ role, content }) => ({ role, content })), repo, attachments, visitor: VISITOR, chat: chatId, name: Profile.get().name || undefined, lang: Profile.get().lang || undefined, instructions: Profile.get().instructions || undefined, temporary: !!temporary }),
       });
       if (res.status === 429) throw new Error('יותר מדי שאלות בזמן קצר. נסה שוב בעוד כמה דקות.');
       if (!res.ok || !res.body) throw new Error('השרת לא הגיב (' + res.status + ').');
@@ -159,7 +191,9 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       const users = messages.filter((m) => m.role === 'user');
       const q = users[users.length - 1].content;
       let searchText = q;
-      if (users.length > 1 && this.index.tok.tokenize(q).length < 6) searchText = users[users.length - 2].content + ' ' + q;
+      const choice = Dialog.choice(messages);
+      if (choice) searchText = choice[1] + ' ' + (users.length > 1 ? users[users.length - 2].content : '');
+      else if (users.length > 1 && this.index.tok.tokenize(q).length < 6) searchText = users[users.length - 2].content + ' ' + q;
       const t0 = performance.now();
       const earlier = messages.slice(0, -1).slice(-4).map((m) => String(m.content || '').slice(0, 600)).join(' ');
       const contextRepos = earlier ? this.index.tok.detectRepos(earlier) : [];
@@ -171,7 +205,8 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
         const ctx = sources.map((s) => `<source n="${s.n}" repo="${s.repo}" path="${s.path}" lines="${s.start}-${s.end}">\n${s.text}\n</source>`).join('\n\n');
         const history = messages.slice(-11, -1).filter((m) => m.content).map(({ role, content }) => ({ role, content: content.slice(0, 6000) }));
         while (history.length && history[0].role !== 'user') history.shift();
-        const input = history.concat([{ role: 'user', content: `${BROWSER_SYSTEM(this.kb)}\n\n<sources>\n${ctx || '(no matching excerpts)'}\n</sources>\n\nQuestion: ${q}` }]);
+        const instr = Profile.get().instructions ? `\n\nThe user's standing preferences for how you answer (never against the rules or the sources): ${Profile.get().instructions}` : '';
+        const input = history.concat([{ role: 'user', content: `${BROWSER_SYSTEM(this.kb)}${instr}\n\n<sources>\n${ctx || '(no matching excerpts)'}\n</sources>\n\nQuestion: ${q}${choice ? `\n(The user picked option ${choice[0]} from your previous message: "${choice[1]}". Answer that option fully now; don't ask again.)` : ''}\n(Reply in ${Profile.get().lang === 'en' ? 'English' : Profile.get().lang === 'he' ? 'Hebrew' : Dialog.lang(messages)}${Profile.get().name ? `; the user's name is ${Profile.get().name}` : ''}, the language of the user's latest message, unless the user asked for a specific language.)` }]);
         // sample() reports the WHOLE answer so far on every update, so we replace rather than append.
         const show = (text) => { if (text && !/^Thinking\.*$/.test(text.trim())) onReplace(text); };
         try {
@@ -200,6 +235,45 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     onDelta(s + 'לחץ על מספר מקור כדי לראות את הקטע המלא.');
   }
 
+  // Same rules as yakovllm/dialog.py: reply in the user's language; "2" picks option 2 of the last answer.
+  const Dialog = {
+    lang(messages) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role !== 'user') continue;
+        const he = (String(m.content).match(/[\u05d0-\u05ea]/g) || []).length, en = (String(m.content).match(/[A-Za-z]/g) || []).length;
+        if (he >= 2) return 'Hebrew';
+        if (en) return 'English';
+      }
+      return 'Hebrew';
+    },
+    options(text) {
+      const groups = []; let cur = [];
+      for (const line of String(text || '').split('\n')) {
+        const m = line.match(/^\s*(?:[-*]\s*)?(\d{1,2})[.)]\s+(.+)$/);
+        if (m) { const n = +m[1]; if (cur.length && n !== cur[cur.length - 1][0] + 1) { groups.push(cur); cur = []; } cur.push([n, m[2]]); }
+        else if (line.trim() && cur.length && !/^[ \t]/.test(line)) { groups.push(cur); cur = []; }
+      }
+      if (cur.length) groups.push(cur);
+      const ok = groups.filter((g) => g.length >= 2 && g[0][0] === 1);
+      return ok.length ? ok[ok.length - 1].map(([, t]) => t.replace(/\*\*|__|`|\[\d+(?:,\s*\d+)*\]/g, '').trim()) : [];
+    },
+    ORD: { first: 1, second: 2, third: 3, fourth: 4, last: -1, one: 1, two: 2, three: 3, four: 4, 'ראשון': 1, 'הראשון': 1, 'הראשונה': 1, 'שני': 2, 'השני': 2, 'השנייה': 2, 'השניה': 2, 'שלישי': 3, 'השלישי': 3, 'השלישית': 3, 'רביעי': 4, 'הרביעי': 4, 'האחרון': -1, 'האחרונה': -1, 'אחת': 1, 'שתיים': 2, 'שלוש': 3, 'ארבע': 4 },
+    choice(messages) {
+      const last = messages[messages.length - 1];
+      if (!last || last.role !== 'user') return null;
+      const prev = [...messages.slice(0, -1)].reverse().find((m) => m.role === 'assistant' && m.content);
+      if (!prev) return null;
+      const m = String(last.content).match(/^\s*(?:the\s+)?(?:(?:option|choice|number|no\.?|#|אפשרות|מספר|סעיף|את|ה|בחרתי(?: ב)?|i choose|i pick|go with)\s*)?([0-9]{1,2}|[א-תa-z']+)(?:\s*(?:one|please|בבקשה|תודה))?\s*[.!)]?\s*$/i);
+      if (!m) return null;
+      let n = /^\d+$/.test(m[1]) ? +m[1] : this.ORD[m[1].toLowerCase()];
+      const opts = this.options(prev.content);
+      if (!n || !opts.length) return null;
+      if (n === -1) n = opts.length;
+      return n >= 1 && n <= opts.length ? [n, opts[n - 1]] : null;
+    },
+  };
+
   const PROSE = new Set(['doc', 'page', 'overview', 'facts', 'symbol', 'file', 'upload']);
   const isEnglish = (t) => !HEBREW.test(t || '');
   function srcLabel(s) {
@@ -221,6 +295,10 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     const repoKey = chat.repo || ((m.sources || []).find((s) => s.repo && s.repo !== 'upload' && !s.path.startsWith('(all')) || {}).repo;
     const r = (UI.backend.repos || []).find((x) => x.key === repoKey);
     const hasFiles = (m.sources || []).some((s) => s.kind === 'upload');
+    // The answer offered numbered options: show them as one-tap choices.
+    const opts = Dialog.options(m.content);
+    const tail = String(m.content).trim().split('\n').slice(-3).join(' ');
+    if (opts.length >= 2 && opts.length <= 5 && /[?？]/.test(tail)) return opts.map((t, i) => ({ opt: i + 1, text: t.length > 70 ? t.slice(0, 68).replace(/\s+\S*$/, '') + '…' : t, send: t }));
     let ideas;
     if (hasFiles) ideas = en ? ['Summarize the attached file in 5 bullets', 'Which of the projects best matches this file?', 'What is missing in the file compared to the projects?']
       : ['סכם את הקובץ המצורף ב-5 נקודות', 'איזה מהפרויקטים הכי מתאים למה שכתוב בקובץ?', 'מה חסר בקובץ לעומת מה שיש בפרויקטים?'];
@@ -232,7 +310,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       ideas = en ? ['Which project is the most impressive, and why?', 'What technologies does Yakov use most?', 'What is the newest project?']
         : ['איזה פרויקט הכי מרשים, ולמה?', 'באילו טכנולוגיות יעקב משתמש הכי הרבה?', 'מה הפרויקט הכי חדש?'];
     }
-    return ideas.filter((q) => !asked.has(q)).slice(0, 3);
+    return ideas.filter((q) => !asked.has(q)).slice(0, 3).map((q) => ({ text: q, send: q }));
   }
 
   // ---------------------------------------------------------------- UI
@@ -246,7 +324,9 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     pendingFiles: [],   // attached before the chat has an id
 
     async start() {
-      this.applyTheme(store.pref('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+      this.applyTheme(store.pref('theme') || 'system');
+      matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if ((store.pref('theme') || 'system') === 'system') this.applyTheme('system'); });
+      this.applyProfile();
       this.chats = store.load();
       this.bind();
       this.backend = await pickBackend();
@@ -262,11 +342,55 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       const ta = $('#input');
       ta.addEventListener('input', () => this.autosize());
       ta.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); this.submit(); }
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && Profile.get().enterSends) { e.preventDefault(); this.submit(); }
       });
+      this.bindSettings();
+      this.enableBrowserMic();
+      $('#temp-btn').addEventListener('click', () => this.toggleTemporary());
+      // select text in an answer -> "ask about this"
+      const quote = document.createElement('button');
+      quote.className = 'quote-btn'; quote.hidden = true;
+      quote.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>שאל על זה</span>';
+      document.body.appendChild(quote);
+      let picked = '';
+      document.addEventListener('selectionchange', () => {
+        clearTimeout(this._selT);
+        this._selT = setTimeout(() => {
+          const sel = getSelection();
+          const node = sel && sel.rangeCount && sel.anchorNode;
+          const inAnswer = node && (node.nodeType === 1 ? node : node.parentElement).closest('.answer');
+          picked = sel ? sel.toString().trim() : '';
+          if (!inAnswer || picked.length < 3) { quote.hidden = true; return; }
+          const r = sel.getRangeAt(0).getBoundingClientRect();
+          quote.style.top = Math.max(8, r.top - 44) + 'px';
+          quote.style.left = Math.min(innerWidth - 130, Math.max(8, r.left + r.width / 2 - 60)) + 'px';
+          quote.hidden = false;
+        }, 120);
+      });
+      quote.addEventListener('pointerdown', (e) => e.preventDefault());
+      document.addEventListener('pointerdown', (e) => { if (e.target !== quote && !quote.contains(e.target)) quote.hidden = true; }, true);
+      $('#scroller').addEventListener('scroll', () => { quote.hidden = true; }, { passive: true });
+      quote.addEventListener('click', () => {
+        const ta = $('#input');
+        ta.value = `> ${picked.replace(/\s+/g, ' ').slice(0, 400)}\n\n`;
+        quote.hidden = true;
+        getSelection().removeAllRanges();
+        this.autosize(); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+      });
+      $('#chat-search').addEventListener('input', (e) => this.filterHistory(e.target.value));
+      // keep an unsent draft if the app is closed
+      ta.value = store.pref('draft') || '';
+      ta.addEventListener('input', () => store.pref('draft', ta.value));
       ta.addEventListener('paste', (e) => {
         const files = [...((e.clipboardData && e.clipboardData.files) || [])];
-        if (files.length) { e.preventDefault(); this.addFiles(files); }
+        if (files.length) { e.preventDefault(); this.addFiles(files); return; }
+        // a very long paste (a whole file or document) becomes an attachment instead of flooding the chat
+        const text = e.clipboardData && e.clipboardData.getData('text/plain');
+        if (text && text.length > 4000) {
+          e.preventDefault();
+          const n = this.allFiles().filter((f) => /^הדבקה/.test(f.name)).length + 1;
+          this.addFiles([new File([text], `הדבקה ${n}.txt`, { type: 'text/plain' })]);
+        }
       });
       $('#attach').addEventListener('click', (e) => { e.stopPropagation(); this.toggleAttachMenu(); });
       $('#pick-files').addEventListener('click', () => { this.toggleAttachMenu(false); $('#file-input').click(); });
@@ -290,6 +414,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       $('#chat-title').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === 'F2') && this.current) { e.preventDefault(); this.startRename(this.current.id, $('#chat-title')); } });
       if (window.YAKOV_EMBEDDED) $('#export').hidden = true;  // sandboxed hosts block downloads
       $('#export').addEventListener('click', () => this.exportChat());
+      $('#sheet-body').addEventListener('submit', (e) => e.preventDefault(), true);
       $('#to-bottom').addEventListener('click', () => { $('#scroller').scrollTo({ top: 1e9, behavior: 'smooth' }); });
       $('#scroller').addEventListener('scroll', () => { const s = $('#scroller'); $('#to-bottom').classList.toggle('show', s.scrollHeight - s.scrollTop - s.clientHeight > 400); }, { passive: true });
       $('#send').addEventListener('click', () => (this.streaming ? this.stop() : this.submit()));
@@ -297,16 +422,17 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       $('#scope').addEventListener('change', (e) => { this.repo = e.target.value; if (this.current) { this.current.repo = this.repo; this.persist(); } });
       $('#theme').addEventListener('click', () => this.applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
       $('#menu').addEventListener('click', () => this.openSidebar());
-      $('#overlay').addEventListener('click', () => { this.closeSidebar(); this.closeDrawer(); this.closeModal(); });
+      $('#overlay').addEventListener('click', () => { if ($('#overlay').classList.contains('for-sheet')) { this.closeSheet(); return; } this.closeSidebar(); this.closeDrawer(); this.closeModal(); this.closeSettings(); });
       $('#drawer-close').addEventListener('click', () => this.closeDrawer());
       $('#projects-btn').addEventListener('click', () => this.openModal());
       $('#sync-btn').addEventListener('click', () => this.openModal());
       $('#modal-close').addEventListener('click', () => this.closeModal());
       $('#sync-now').addEventListener('click', () => this.syncNow());
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') { this.closeDrawer(); this.closeModal(); this.closeSidebar(); this.toggleAttachMenu(false); }
+        if (e.key === 'Escape') { if (!$('#sheet').hidden) { this.closeSheet(); return; } this.closeDrawer(); this.closeModal(); this.closeSettings(); this.closeSidebar(); this.toggleAttachMenu(false); }
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); this.newChat(); }
         if (e.key === '/' && !e.target.closest('input, textarea, [contenteditable="true"]')) { e.preventDefault(); $('#input').focus(); }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); this.openSidebar(); $('#chat-search').focus(); $('#chat-search').select(); }
       });
       $('#thread').addEventListener('click', (e) => this.onThreadClick(e));
       $('#welcome').addEventListener('click', (e) => {
@@ -316,9 +442,201 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     },
 
     applyTheme(t) {
-      document.documentElement.dataset.theme = t;
+      const real = t === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : t;
+      document.documentElement.dataset.theme = real;
       store.pref('theme', t);
-      $('#theme').setAttribute('aria-label', t === 'dark' ? 'מעבר למצב בהיר' : 'מעבר למצב כהה');
+      $('#theme').setAttribute('aria-label', real === 'dark' ? 'מעבר למצב בהיר' : 'מעבר למצב כהה');
+      document.querySelectorAll('[data-theme-set]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeSet === t)));
+    },
+
+    // ---- profile and settings
+    applyProfile() {
+      const p = Profile.get();
+      document.documentElement.dataset.size = p.size;
+      $('#side-avatar').innerHTML = avatarHTML(p);
+      $('#side-name').textContent = p.name || 'אורח';
+      $('#avatar-pick').innerHTML = avatarHTML(p);
+      $('#avatar-remove').hidden = !p.avatar;
+      const hello = $('#hello') || (() => { const e = document.createElement('p'); e.id = 'hello'; e.className = 'hello'; e.dir = 'auto'; $('#welcome h1').before(e); return e; })();
+      const h = new Date().getHours();
+      hello.textContent = p.name ? `${h < 12 ? 'בוקר טוב' : h < 18 ? 'צהריים טובים' : 'ערב טוב'}, ${p.name}` : '';
+      hello.hidden = !p.name;
+      document.querySelectorAll('[data-size]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.size === p.size)));
+    },
+    openSettings() {
+      const p = Profile.get();
+      $('#set-name').value = p.name;
+      $('#set-lang').value = p.lang;
+      $('#set-enter').checked = p.enterSends;
+      $('#set-instr').value = p.instructions || '';
+      $('#mem-box').innerHTML = '<button class="btn" id="mem-show">מה אתה זוכר עליי?</button>';
+      $('#mem-show').addEventListener('click', () => this.showMemory());
+      this.applyProfile();
+      this.applyTheme(store.pref('theme') || 'system');
+      this.closeSidebar();
+      $('#settings').classList.add('show');
+      $('#overlay').classList.add('show');
+      $('#settings-close').focus();
+    },
+    closeSettings() {
+      if (!$('#settings').classList.contains('show')) return;
+      Profile.set({ name: $('#set-name').value.replace(/\s+/g, ' ').trim().slice(0, 40) });
+      this.applyProfile();
+      $('#settings').classList.remove('show');
+      if (!$('#drawer').classList.contains('open') && !$('#modal').classList.contains('show')) $('#overlay').classList.remove('show');
+    },
+    bindSettings() {
+      $('#profile-btn').addEventListener('click', () => this.openSettings());
+      $('#settings-close').addEventListener('click', () => this.closeSettings());
+      $('#set-name').addEventListener('change', () => { Profile.set({ name: $('#set-name').value.replace(/\s+/g, ' ').trim().slice(0, 40) }); this.applyProfile(); });
+      $('#set-lang').addEventListener('change', (e) => { Profile.set({ lang: e.target.value }); toast('נשמר'); });
+      $('#set-enter').addEventListener('change', (e) => Profile.set({ enterSends: e.target.checked }));
+      $('#set-instr').addEventListener('change', (e) => { Profile.set({ instructions: e.target.value.trim().slice(0, 1500) }); toast('ההוראות נשמרו'); });
+      $('#mem-show').addEventListener('click', () => this.showMemory());
+      document.querySelectorAll('[data-theme-set]').forEach((b) => b.addEventListener('click', () => this.applyTheme(b.dataset.themeSet)));
+      document.querySelectorAll('[data-size]').forEach((b) => b.addEventListener('click', () => { Profile.set({ size: b.dataset.size }); this.applyProfile(); }));
+      const pick = () => $('#avatar-input').click();
+      $('#avatar-pick').addEventListener('click', pick);
+      $('#avatar-change').addEventListener('click', pick);
+      $('#avatar-remove').addEventListener('click', () => { Profile.set({ avatar: '' }); this.applyProfile(); });
+      $('#avatar-input').addEventListener('change', async (e) => {
+        const f = e.target.files[0];
+        e.target.value = '';
+        if (!f) return;
+        try { Profile.set({ avatar: await shrinkImage(f) }); this.applyProfile(); toast('התמונה עודכנה'); } catch (err) { toast(err.message); }
+      });
+      $('#clear-all').addEventListener('click', () => {
+        this.closeSettings();
+        this.sheet('למחוק את כל השיחות?', `<p>${this.chats.length} שיחות והקבצים שצורפו אליהן יימחקו מהמכשיר. אי אפשר לבטל את זה.</p>
+          <div class="row"><button class="btn" data-sheet-close>ביטול</button><button class="btn danger solid" id="confirm-clear">מחיקת הכל</button></div>`);
+        $('#confirm-clear').addEventListener('click', () => {
+          this.chats.forEach((c) => window.YakovFiles.DB.del(c.id));
+          this.chats = []; store.mem = []; store.save();
+          this.closeSheet(); this.newChat(); toast('כל השיחות נמחקו');
+        });
+      });
+    },
+
+    // ---- feedback, read aloud
+    vote(idx, vote, el) {
+      const c = this.current, m = c.messages[idx];
+      m.vote = m.vote === vote ? null : vote;
+      this.fillBot(el, m, false);
+      if (!c.temporary) this.persist();
+      if (m.vote && this.backend.kind === 'server') {
+        const q = (c.messages.slice(0, idx).reverse().find((x) => x.role === 'user') || {}).content || '';
+        fetch(this.backend.url('api/feedback'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ visitor: VISITOR, chat: c.id, vote: m.vote, question: q, answer: m.content.slice(0, 600) }) }).catch(() => {});
+      }
+      if (m.vote) toast(m.vote === 'up' ? 'תודה! שמחתי לעזור' : 'תודה, זה עוזר לי להשתפר');
+    },
+    speak(m, btn) {
+      const synth = window.speechSynthesis;
+      if (synth.speaking) { synth.cancel(); document.querySelectorAll('.speaking').forEach((b) => b.classList.remove('speaking')); if (btn.classList.contains('was')) { btn.classList.remove('was'); return; } }
+      const text = m.content.replace(/```[\s\S]*?```/g, ' (קוד) ').replace(/\[\d+(?:,\s*\d+)*\]/g, '').replace(/[#*_`>|]/g, '').replace(/\n+/g, '. ');
+      const u = new SpeechSynthesisUtterance(text.slice(0, 6000));
+      u.lang = isEnglish(m.content) ? 'en-US' : 'he-IL';
+      const voice = synth.getVoices().find((v) => v.lang.toLowerCase().startsWith(u.lang.slice(0, 2)));
+      if (voice) u.voice = voice;
+      u.onend = u.onerror = () => btn.classList.remove('speaking', 'was');
+      btn.classList.add('speaking', 'was');
+      synth.speak(u);
+    },
+
+    // ---- temporary chat: not saved on the device, not remembered by the server
+    toggleTemporary() {
+      if (this.current && this.current.messages.length) return;
+      this.temporary = !this.temporary;
+      this.updateTempUI();
+      toast(this.temporary ? 'שיחה זמנית: לא תישמר ולא תיזכר' : 'שיחה רגילה');
+    },
+    updateTempUI() {
+      const b = $('#temp-btn');
+      b.hidden = !!(this.current && this.current.messages.length && !this.current.temporary);
+      b.setAttribute('aria-pressed', String(!!this.temporary));
+      let note = $('#temp-note');
+      if (this.temporary && !(this.current && this.current.messages.length)) {
+        if (!note) { note = document.createElement('p'); note.id = 'temp-note'; note.className = 'temp-note'; $('#welcome h1').after(note); }
+        note.textContent = 'שיחה זמנית: היא לא תופיע בהיסטוריה, ו-yakov.LLM לא יזכור אותה.';
+      } else if (note) note.remove();
+    },
+
+    // ---- search in chats (titles and content)
+    filterHistory(q) {
+      this.query = q.trim().toLowerCase();
+      this.renderHistory();
+    },
+
+    // ---- what the server remembers about me
+    async showMemory() {
+      const box = $('#mem-box');
+      if (this.backend.kind !== 'server') { box.innerHTML = '<span>הזיכרון זמין כשהשרת מחובר.</span>'; return; }
+      box.innerHTML = '<span>טוען…</span>';
+      try {
+        const r = await fetch(this.backend.url('api/memory/me'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visitor: VISITOR }) }).then((x) => x.json());
+        if (!r.known) { box.innerHTML = '<span>אני עוד לא זוכר עליך כלום.</span>'; return; }
+        box.innerHTML = `<span>${r.conversations === 1 ? 'דיברנו פעם אחת' : `דיברנו ${r.conversations} פעמים`}, מאז ${esc(r.first)}.${r.names.length ? ' קראת לעצמך ' + esc(r.names.join(', ')) + '.' : ''}</span>
+          ${r.projects.length ? `<span>שאלת על: ${r.projects.map(esc).join(', ')}</span>` : ''}
+          ${r.notes.length ? `<span>דברים שסיפרת לי (לא מאומתים):</span><ul>${r.notes.map((n) => `<li dir="auto">${esc(n)}</li>`).join('')}</ul>` : ''}
+          <div class="row"><button class="btn danger" id="mem-forget">מחיקת הזיכרון שלי</button></div>`;
+        $('#mem-forget').addEventListener('click', async () => {
+          await fetch(this.backend.url('api/memory/forget'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visitor: VISITOR }) }).catch(() => {});
+          box.innerHTML = '<span>הזיכרון נמחק. מעכשיו אני מתחיל מחדש.</span>';
+        });
+      } catch { box.innerHTML = '<span>לא הצלחתי לטעון את הזיכרון.</span>'; }
+    },
+
+    // ---- action sheet (long press on a chat, like the big chat apps)
+    sheet(title, html) {
+      const sh = $('#sheet');
+      $('#sheet-title').textContent = title;
+      $('#sheet-body').innerHTML = html;
+      sh.hidden = false;
+      $('#overlay').classList.add('show', 'for-sheet');
+      requestAnimationFrame(() => sh.classList.add('show'));
+      $('#sheet-body').querySelectorAll('[data-sheet-close]').forEach((b) => b.addEventListener('click', () => this.closeSheet()));
+      const first = $('#sheet-body input, #sheet-body button');
+      if (first) setTimeout(() => first.focus(), 60);
+    },
+    closeSheet() {
+      const sh = $('#sheet');
+      if (sh.hidden) return;
+      sh.classList.remove('show');
+      setTimeout(() => { sh.hidden = true; }, 200);
+      $('#overlay').classList.remove('for-sheet');
+      if (!$('#sidebar').classList.contains('open') && !$('#drawer').classList.contains('open') && !$('#modal').classList.contains('show') && !$('#settings').classList.contains('show')) $('#overlay').classList.remove('show');
+    },
+    chatActions(id) {
+      const c = this.chats.find((x) => x.id === id);
+      if (!c) return;
+      if (navigator.vibrate) try { navigator.vibrate(12); } catch { /* ignore */ }
+      this.sheet(c.title, `
+        <button class="act" data-a="rename">${ICON.edit}<span>שינוי שם</span></button>
+        <button class="act" data-a="pin">${ICON.pin}<span>${c.pinned ? 'ביטול הצמדה' : 'הצמדה למעלה'}</span></button>
+        ${window.YAKOV_EMBEDDED ? '' : `<button class="act" data-a="export">${ICON.save}<span>שמירה כקובץ</span></button>`}
+        <button class="act danger" data-a="delete">${ICON.trash}<span>מחיקה</span></button>`);
+      $('#sheet-body').onclick = (e) => {
+        const a = e.target.closest('[data-a]');
+        if (!a) return;
+        if (a.dataset.a === 'rename') this.renameSheet(c);
+        if (a.dataset.a === 'pin') { c.pinned = !c.pinned; store.mem = this.chats; store.save(); this.renderHistory(); this.closeSheet(); toast(c.pinned ? 'השיחה הוצמדה' : 'ההצמדה בוטלה'); }
+        if (a.dataset.a === 'export') { this.exportChat(c); this.closeSheet(); }
+        if (a.dataset.a === 'delete') this.sheet('למחוק את השיחה?', `<p dir="auto">"${esc(c.title)}" תימחק מהמכשיר. אי אפשר לבטל את זה.</p>
+          <div class="row"><button class="btn" data-sheet-close>ביטול</button><button class="btn danger solid" data-a="really-delete">מחיקה</button></div>`);
+        if (a.dataset.a === 'really-delete') { this.remove(c.id); this.closeSheet(); toast('השיחה נמחקה'); }
+      };
+    },
+    renameSheet(c) {
+      this.sheet('שינוי שם', `<form id="rename-form"><input type="text" id="rename-input" maxlength="80" dir="auto" value="${esc(c.title)}" aria-label="שם השיחה">
+        <div class="row"><button type="button" class="btn" data-sheet-close>ביטול</button><button class="btn primary">שמירה</button></div></form>`);
+      const input = $('#rename-input');
+      setTimeout(() => input.select(), 80);
+      $('#rename-form').onsubmit = (e) => {
+        e.preventDefault();
+        const name = input.value.replace(/\s+/g, ' ').trim();
+        if (name) { c.title = name; c.renamed = true; store.mem = this.chats; store.save(); if (this.current && this.current.id === c.id) $('#chat-title').textContent = name; this.renderHistory(); toast('השם נשמר'); }
+        this.closeSheet();
+      };
     },
 
     autosize() {
@@ -331,6 +649,8 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     // ---- chats
     newChat() {
       this.current = null;
+      this.temporary = false;
+      setTimeout(() => this.updateTempUI());
       this.files = [];
       this.pendingFiles = [];
       this.renderFiles();
@@ -345,6 +665,8 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       const c = this.chats.find((x) => x.id === id);
       if (!c) return;
       this.current = c;
+      this.temporary = !!c.temporary;
+      setTimeout(() => this.updateTempUI());
       this.setScope(c.repo || '');
       this.files = [];
       this.pendingFiles = [];
@@ -369,6 +691,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     },
     persist() {
       if (!this.current) return;
+      if (this.current.temporary) { this.updateTempUI(); return; }  // a temporary chat stays in memory only
       this.current.updated = Date.now();
       this.chats = [this.current, ...this.chats.filter((x) => x.id !== this.current.id)];
       store.mem = this.chats;
@@ -383,27 +706,48 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     renderHistory() {
       const box = $('#history');
       if (!this.chats.length) { box.innerHTML = '<p class="empty-history">השיחות שלך יופיעו כאן.</p>'; return; }
+      if (this.query && !this.chats.some((c) => c.title.toLowerCase().includes(this.query) || c.messages.some((m) => String(m.content || '').toLowerCase().includes(this.query)))) { box.innerHTML = '<p class="empty-history">לא נמצאו שיחות.</p>'; return; }
       const day = 864e5, now = Date.now();
-      const groups = [['היום', (t) => now - t < day], ['השבוע', (t) => now - t < 7 * day], ['קודם', () => true]];
+      const groups = [['מוצמדות', (t, c) => c.pinned], ['היום', (t) => now - t < day], ['השבוע', (t) => now - t < 7 * day], ['קודם', () => true]];
       let html = '';
       const used = new Set();
       for (const [label, test] of groups) {
-        const items = this.chats.filter((c) => !used.has(c.id) && test(c.updated || c.created));
+        const q = this.query || '';
+        const match = (c) => !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => String(m.content || '').toLowerCase().includes(q));
+        const items = this.chats.filter((c) => !used.has(c.id) && match(c) && test(c.updated || c.created, c));
         if (!items.length) continue;
         html += `<h3>${label}</h3>`;
         for (const c of items) {
           used.add(c.id);
-          html += `<div class="chat-item" role="listitem" ${this.current && this.current.id === c.id ? 'aria-current="true"' : ''}>
+          html += `<div class="chat-item" role="listitem" data-chat="${c.id}" ${this.current && this.current.id === c.id ? 'aria-current="true"' : ''}>
+            ${c.pinned ? `<span class="pin" aria-hidden="true">${ICON.pin}</span>` : ''}
             <button class="chat-open" data-id="${c.id}" style="all:unset;flex:1;min-width:0;cursor:pointer"><span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" dir="auto">${esc(c.title)}</span></button>
-            <button class="del" data-ren="${c.id}" aria-label="שינוי שם השיחה ${esc(c.title)}" title="שינוי שם">${ICON.edit}</button>
-            <button class="del" data-del="${c.id}" aria-label="מחיקת השיחה ${esc(c.title)}" title="מחיקה">${ICON.trash}</button></div>`;
+            <button class="more" data-more="${c.id}" aria-label="אפשרויות לשיחה ${esc(c.title)}" title="אפשרויות">${ICON.more}</button></div>`;
         }
       }
       box.innerHTML = html;
-      box.querySelectorAll('[data-id]').forEach((b) => b.addEventListener('click', () => { this.open(b.dataset.id); this.closeSidebar(); }));
-      box.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => this.remove(b.dataset.del)));
-      box.querySelectorAll('[data-ren]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); this.startRename(b.dataset.ren, b.closest('.chat-item').querySelector('.chat-open')); }));
-      box.querySelectorAll('.chat-open').forEach((b) => b.addEventListener('dblclick', (e) => { e.preventDefault(); this.startRename(b.dataset.id, b); }));
+      box.querySelectorAll('.chat-item').forEach((row) => this.bindLongPress(row));
+      box.querySelectorAll('[data-more]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); this.chatActions(b.dataset.more); }));
+    },
+
+    // Tap opens the chat; a long press (or right click) opens its actions. Nothing destructive happens on a tap.
+    bindLongPress(row) {
+      const id = row.dataset.chat;
+      let timer = 0, fired = false, x = 0, y = 0;
+      const cancel = () => { clearTimeout(timer); row.classList.remove('pressing'); };
+      row.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || e.target.closest('[data-more]')) return;
+        fired = false; x = e.clientX; y = e.clientY;
+        row.classList.add('pressing');
+        timer = setTimeout(() => { fired = true; row.classList.remove('pressing'); this.chatActions(id); }, 480);
+      });
+      row.addEventListener('pointermove', (e) => { if (Math.abs(e.clientX - x) > 8 || Math.abs(e.clientY - y) > 8) cancel(); });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => row.addEventListener(ev, cancel));
+      row.addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); if (!fired) { fired = true; this.chatActions(id); } });
+      row.querySelector('.chat-open').addEventListener('click', (e) => {
+        if (fired) { e.preventDefault(); fired = false; return; }
+        this.open(id); this.closeSidebar();
+      });
     },
 
     // Rename a chat in place: an input takes the title's place; Enter saves, Escape cancels.
@@ -455,6 +799,12 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     },
     async addFiles(list) {
       const Files = window.YakovFiles;
+      // archives: open them and add what's inside
+      const zips = list.filter((f) => /\.zip$/i.test(f.name));
+      if (zips.length) {
+        list = list.filter((f) => !zips.includes(f));
+        for (const z of zips) { try { list = list.concat(await Files.expandZip(z)); } catch { toast(`לא הצלחתי לפתוח את ${z.name}`); } }
+      }
       const target = this.allFiles();
       const fresh = list.filter((f) => !Files.SKIP_DIRS.test((f.webkitRelativePath || f.name)) && !/(^|\/)\./.test(f.webkitRelativePath || f.name));
       const ok = fresh.filter((f) => Files.supported(f.webkitRelativePath || f.name));
@@ -487,7 +837,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     saveFiles() {
       const ready = this.files.filter((f) => f.status === 'ready');
       this.current.fileCount = ready.length;
-      window.YakovFiles.DB.put(this.current.id, ready.map((f) => ({ ...f })));
+      if (!this.current.temporary) window.YakovFiles.DB.put(this.current.id, ready.map((f) => ({ ...f })));
       this.persist();
     },
     renderFiles() {
@@ -585,7 +935,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       const el = document.createElement('div');
       el.className = 'msg bot';
       el.dataset.idx = idx;
-      el.innerHTML = `${LOGO(26, 'bot-mark')}<div><div class="answer" dir="auto"></div><div class="sources"></div><div class="msg-tools"></div></div>`;
+      el.innerHTML = `${LOGO(26, 'bot-mark')}<div><div class="answer" dir="auto"></div><div class="sources" hidden></div><div class="msg-tools"></div></div>`;
       this.fillBot(el, m, false);
       return el;
     },
@@ -595,7 +945,9 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
         ans.innerHTML = `<div class="error-box">${esc(m.error)}</div>`;
       } else if (!m.content && live) {
         const n = (this.backend.repos || []).length;
-        ans.innerHTML = `<div class="thinking"><span class="bars"><i></i><i></i><i></i></span>${m.sources ? 'כותב תשובה…' : `מחפש ב-${n} מאגרים…`}</div>`;
+        const files = this.files.filter((f) => f.status === 'ready').length;
+        const status = m.sources ? 'כותב תשובה…' : (files ? `קורא ${files === 1 ? 'קובץ אחד' : files + ' קבצים'} ומחפש ב-${n} פרויקטים…` : `מחפש ב-${n} פרויקטים…`);
+        ans.innerHTML = `<div class="thinking" role="status"><span class="bars"><i></i><i></i><i></i></span>${status}</div>`;
       } else {
         ans.innerHTML = MD.render(m.content, { sources: m.sources });
         if (live) { const last = ans.lastElementChild; if (last && !last.classList.contains('codeblock')) last.classList.add('caret'); }
@@ -604,9 +956,12 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       src.innerHTML = (m.sources || []).map((s, i) => `<button class="src-chip" data-src="${i}" title="${esc(s.repo + ' › ' + s.path)}">
         <span class="n">${i + 1}</span><span class="p" dir="auto">${s.kind === 'upload' ? '📎 ' : ''}${esc(srcLabel(s))}</span><span class="r">${esc(s.kind === 'upload' ? 'קובץ מצורף' : s.repo)}</span></button>`).join('');
       const tools = $('.msg-tools', el);
-      tools.innerHTML = live ? '' : `<button class="icon-btn" data-act="copy" aria-label="העתקת התשובה">${ICON.copy}</button>
-        <button class="icon-btn" data-act="retry" aria-label="תשובה חדשה">${ICON.retry}</button>
-        ${m.meta ? `<span class="meta">${m.meta.sources} מקורות · חיפוש ${m.meta.search_ms} ms${m.meta.mode === 'offline' ? ' · ללא מודל' : ''}</span>` : ''}`;
+      tools.innerHTML = live ? '' : `<button class="icon-btn" data-act="copy" aria-label="העתקת התשובה" title="העתקה">${ICON.copy}</button>
+        <button class="icon-btn" data-act="retry" aria-label="תשובה חדשה" title="תשובה חדשה">${ICON.retry}</button>
+        ${m.content && !m.error ? `${'speechSynthesis' in window ? `<button class="icon-btn" data-act="speak" aria-label="הקראה בקול" title="הקראה">${ICON.speak}</button>` : ''}
+        <button class="icon-btn ${m.vote === 'up' ? 'on' : ''}" data-act="up" aria-label="תשובה טובה" aria-pressed="${m.vote === 'up'}" title="תשובה טובה">${ICON.up}</button>
+        <button class="icon-btn ${m.vote === 'down' ? 'on' : ''}" data-act="down" aria-label="תשובה לא טובה" aria-pressed="${m.vote === 'down'}" title="תשובה לא טובה">${ICON.down2}</button>` : ''}
+        ${(m.sources || []).length && !m.error ? `<button class="src-toggle" data-act="sources" aria-expanded="false">${isEnglish(m.content) ? 'Sources' : 'מקורות'} · ${m.sources.length}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>` : ''}`;
     },
     renderFollowUps() {
       document.querySelectorAll('.followups').forEach((n) => n.remove());
@@ -619,7 +974,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       if (!ideas.length || !el) return;
       const box = document.createElement('div');
       box.className = 'followups';
-      box.innerHTML = ideas.map((q) => `<button class="starter" data-follow="${esc(q)}" dir="auto">${esc(q)}</button>`).join('');
+      box.innerHTML = ideas.map((q) => `<button class="starter${q.opt ? ' opt' : ''}" data-follow="${esc(q.send)}" dir="auto">${q.opt ? `<b>${q.opt}</b>` : ''}${esc(q.text)}</button>`).join('');
       $('.msg-tools', el).after(box);
     },
 
@@ -661,6 +1016,9 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       if (!act || !m) return;
       if (act.dataset.act === 'copy') copyText(m.content).then(() => { act.innerHTML = ICON.check; setTimeout(() => (act.innerHTML = ICON.copy), 1500); });
       if (act.dataset.act === 'retry' && !this.streaming) this.regenerate(+msgEl.dataset.idx);
+      if (act.dataset.act === 'speak') this.speak(m, act);
+      if (act.dataset.act === 'up' || act.dataset.act === 'down') this.vote(+msgEl.dataset.idx, act.dataset.act, msgEl);
+      if (act.dataset.act === 'sources') { const box = $('.sources', msgEl); box.hidden = !box.hidden; act.setAttribute('aria-expanded', String(!box.hidden)); }
     },
 
     ask(text) { $('#input').value = text; this.submit(); },
@@ -670,10 +1028,11 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       const text = ta.value.trim();
       if (!text || this.streaming) return;
       ta.value = '';
+      store.pref('draft', '');
       this.autosize();
       if (this.allFiles().some((f) => f.status === 'reading')) { toast('רגע, הקבצים עדיין נקראים…'); ta.value = text; return; }
       if (!this.current) {
-        this.current = { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: chatTitle(text), created: Date.now(), updated: Date.now(), repo: this.repo, messages: [] };
+        this.current = { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: chatTitle(text), created: Date.now(), updated: Date.now(), repo: this.repo, messages: [], temporary: !!this.temporary };
         $('#welcome').hidden = true;
         $('#thread').innerHTML = '';
         $('#chat-title').textContent = this.current.title;
@@ -686,6 +1045,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       $('#thread').appendChild(this.userEl(um, this.current.messages.length - 1));
       this.persist();
       this.renderHistory();
+      this.updateTempUI();
       this.run();
     },
 
@@ -728,7 +1088,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       const paint = () => { frame = 0; this.fillBot(el, bm, true); this.scrollDown(); };
       try {
         await this.backend.chat({
-          messages: history, repo: this.repo || null, signal: ctl.signal, attachments, chatId: chat.id,
+          messages: history, repo: this.repo || null, signal: ctl.signal, attachments, chatId: chat.id, temporary: chat.temporary,
           onMeta: (meta) => { bm.sources = meta.sources; bm.meta = { sources: meta.sources.length, search_ms: meta.search_ms, mode: meta.mode }; paint(); },
           onDelta: (t) => { lastText = Date.now(); bm.content += t; if (!frame) frame = requestAnimationFrame(paint); },
           onReplace: (t) => { lastText = Date.now(); bm.content = t; if (!frame) frame = requestAnimationFrame(paint); },
@@ -754,8 +1114,8 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       }
     },
 
-    exportChat() {
-      const c = this.current;
+    exportChat(chat) {
+      const c = chat || this.current;
       if (!c) { toast('אין עדיין שיחה לייצא'); return; }
       let md = `# ${c.title}\n\n_yakov.LLM · ${new Date(c.created).toLocaleString('he-IL')}_\n\n`;
       for (const m of c.messages) {
@@ -824,6 +1184,29 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     closeSidebar() { $('#sidebar').classList.remove('open'); if (!$('#drawer').classList.contains('open')) $('#overlay').classList.remove('show'); },
     openModal() { this.renderModal(); $('#modal').classList.add('show'); $('#overlay').classList.add('show'); $('#modal-close').focus(); },
     closeModal() { $('#modal').classList.remove('show'); if (!$('#drawer').classList.contains('open') && !$('#sidebar').classList.contains('open')) $('#overlay').classList.remove('show'); },
+
+    // Voice typing with the browser's own speech recognition (Chrome, Edge, Safari).
+    enableBrowserMic() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR || window.YAKOV_EMBEDDED) return;
+      const mic = $('#mic');
+      mic.classList.add('on');
+      let rec = null;
+      mic.addEventListener('click', () => {
+        if (rec) { rec.stop(); return; }
+        rec = new SR();
+        const ta = $('#input');
+        rec.lang = Profile.get().lang === 'en' ? 'en-US' : 'he-IL';
+        rec.interimResults = true;
+        rec.continuous = false;
+        const before = ta.value ? ta.value.trim() + ' ' : '';
+        rec.onresult = (e) => { ta.value = before + [...e.results].map((r) => r[0].transcript).join(''); this.autosize(); };
+        rec.onend = () => { rec = null; mic.classList.remove('listening'); store.pref('draft', ta.value); };
+        rec.onerror = (e) => { if (e.error === 'not-allowed') toast('צריך לאשר גישה למיקרופון'); };
+        mic.classList.add('listening');
+        rec.start();
+      });
+    },
 
     enableMic(d) {
       const mic = $('#mic');

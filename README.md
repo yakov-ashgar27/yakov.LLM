@@ -40,7 +40,8 @@ flowchart LR
 4. **Code facts.** Raw code answers questions asked in the code's words. People ask in their own words ("where is the password hashed?", "what does it depend on?", "who calls this?"), so every push also regenerates fact cards from the code: one per function, class, method, React component, API route and database table (signature, docstring, file and lines, what it calls, where it is used), one per file (role, definitions, imports), and a few per project (dependencies, how to run, tests and CI, endpoints, tables, environment variables, folder structure). There are about 5,000 cards across 11 projects. They are generated, never hand-written, so they can't go stale.
 5. **Your files too.** Attach files or a whole folder (Word, PDF, PowerPoint, Excel, text, code). They are read into text (Office files in the browser, PDF on the server), searched with the same engine, and their best passages go to the model next to the project sources. So you can ask "which project fits this job description?".
 6. **Memory.** The app remembers who it talked with (a random id the browser keeps, plus a name if one is given) and their earlier questions, so a returning visitor is greeted with context. What people *claim* is stored as an unverified note for Yakov to review on `/admin.html`, and never becomes part of the knowledge base. A name from another device only reveals that someone by that name talked before, never what they said.
-7. **Stay current.** See below.
+7. **A real chat app.** Answers reply in the language you write in (or the one you pick), and a reply of just "2" picks option 2 of the last answer. Sources stay folded under each answer. Long-press a chat to rename, pin, save or delete it; search all chats; temporary chats that are neither saved nor remembered; a profile with name and photo; standing instructions ("answer in 3 bullets"); 👍/👎; read aloud; voice typing; select text in an answer to ask about it; a "what do you remember about me?" screen with a delete button; drafts that survive closing the app. Zip files and very long pastes become attachments.
+8. **Stay current.** See below.
 
 ![A citation opens the exact lines](docs/screenshot-source.png)
 
@@ -123,7 +124,7 @@ Settings are in [`.env.example`](.env.example).
 pip install pytest && python -m pytest -q
 ```
 
-There are 43 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against fake Claude and OpenAI-compatible servers that speak their streaming protocols, webhook signatures, rate limiting, CORS for the static demo, identical Python and JavaScript search results on every evaluation question, the fact extractor, memory (recall, unverified notes, never touching the knowledge base, name-only recall across devices), attachments and Word/PowerPoint/Excel/PDF extraction, and guards that fail CI if Hit@5 drops below 80% or the auto-generated symbol questions drop below 90%.
+There are 46 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against fake Claude and OpenAI-compatible servers that speak their streaming protocols, webhook signatures, rate limiting, CORS for the static demo, identical Python and JavaScript search results on every evaluation question, the fact extractor, reply language and numbered-option picks, temporary chats, feedback and "forget me", memory (recall, unverified notes, never touching the knowledge base, name-only recall across devices), attachments and Word/PowerPoint/Excel/PDF extraction, and guards that fail CI if Hit@5 drops below 80% or the auto-generated symbol questions drop below 90%.
 
 ## Design decisions
 
@@ -142,6 +143,7 @@ yakovllm/
   chunker.py      files -> chunks with line numbers
   facts.py        code facts: symbol, file and project cards
   memory.py       visitors, their questions and unverified notes
+  dialog.py       reply language, "2" means option 2
   extract.py      text from Word, PowerPoint, Excel and PDF
   ingest.py       clone/read repos -> data/kb.json
   sync.py         incremental GitHub sync, live index swap
@@ -164,6 +166,8 @@ scripts/          build_demo.py (single-file demo), build_offline_kb.py
 | GET/POST | `/api/search?q=…&repo=…&k=…` | Raw search results with scores and matched terms |
 | POST | `/api/chat` | `{messages, repo?, attachments?, visitor?, chat?}` → Server-Sent Events: `meta` (sources), `delta` (text), `done` |
 | POST | `/api/extract` | File bytes (name in `X-Filename`) → `{text}` for Word, PowerPoint, Excel, PDF |
+| POST | `/api/feedback` | `{visitor, chat, vote: up/down, question, answer}` |
+| POST | `/api/memory/me`, `/api/memory/forget` | What it remembers about this visitor, and deleting it |
 | GET | `/api/memory` | Visitors, questions and unverified notes (`Authorization: Bearer <ADMIN_TOKEN>`) |
 | POST | `/api/sync` | Check GitHub now (with `SYNC_TOKEN` set, needs `Authorization: Bearer <token>`) |
 | POST | `/api/webhook/github` | GitHub webhook (HMAC-SHA256 verified) |

@@ -20,6 +20,8 @@ import urllib.error
 import urllib.request
 from typing import Iterator
 
+from . import dialog
+
 API_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/") + "/v1/messages"
 API_VERSION = "2023-06-01"
 
@@ -33,8 +35,10 @@ How to answer:
 - Reply in the language of the user's latest message (Hebrew or English). Hebrew answers use natural, modern, friendly Hebrew; keep code, file names and identifiers in English.
 - Sound like a sharp, warm senior engineer who knows this code by heart: direct, clear, a little enthusiastic about good engineering, never stiff or salesy. Greetings and small talk get a short friendly reply and an offer of what you can show.
 - Shape every answer for easy reading: open with the direct answer in one or two sentences (bold the key fact), then the details. Use short paragraphs, `###` headings only when the answer has several parts, bullet lists for parallel items, a table when comparing things, and fenced code blocks with a language tag for code. Short questions get short answers.
+- Give a complete answer whenever you can: pick the most likely meaning and answer it. Only when a question is truly open-ended ("tell me about it", "yes", "what else?"), offer 2-4 numbered options (a bold short title and a few words each) and end with one short question; the user may answer with just the number, which means that option.
+- If the user's message is a number or a pick ("2", "the second", "אפשרות 2"), it chooses that option from your previous message: answer it fully, never ask again.
 - When it helps, end with one short line suggesting a natural next question (in italics). Don't add it to every answer.
-- Base every factual claim about the projects on the numbered <source> excerpts in the user's message. Cite them inline as [1], [2] right after the claim. Never invent sources, file names, numbers or features.
+- Base every factual claim about the projects on the numbered <source> excerpts in the user's message. Cite them inline as [1], [2] right after the claim, sparingly: one citation per point, not after every sentence. Never invent sources, file names, numbers or features.
 - Sources include the real code, docs and auto-generated fact cards (a function's signature, file and lines, what it calls and where it is used; a file's role and imports; a project's dependencies, run commands, tests, CI, API endpoints, database tables and settings). Combine them: answer "how does X work" from the code, "where/who uses X" from the cards, "how do I run it / what does it depend on" from the project facts.
 - If the sources don't contain the answer, say so plainly, and suggest where in the repo it might be or what to ask instead. General programming knowledge is fine when clearly marked as general.
 - Be concrete: name files and functions, quote short code snippets, and explain why the code is built that way.
@@ -118,7 +122,7 @@ def format_sources(hits: list[dict], max_chars: int = 4000) -> str:
     return "\n\n".join(parts)
 
 
-def build_messages(history: list[dict], hits: list[dict]) -> list[dict]:
+def build_messages(history: list[dict], hits: list[dict], lang: str | None = None) -> list[dict]:
     """Chat history with the retrieved sources attached to the latest user turn."""
     msgs = [{"role": m["role"], "content": str(m["content"])[:8000]}
             for m in history if m.get("role") in ("user", "assistant") and m.get("content")]
@@ -130,7 +134,15 @@ def build_messages(history: list[dict], hits: list[dict]) -> list[dict]:
     last = msgs[-1]["content"]
     p = provider()
     context = format_sources(hits, p["max_source_chars"] if p else 4000) if hits else "(no matching excerpts were found)"
-    msgs[-1] = {"role": "user", "content": f"<sources>\n{context}\n</sources>\n\nQuestion: {last}"}
+    note = ""
+    choice = dialog.resolve_choice(history)
+    if choice:
+        note += f'\n(The user picked option {choice[0]} from your previous message: "{choice[1]}". Answer that option fully now; don\'t ask again.)'
+    if lang:
+        note += f"\n(Reply in {lang}: the user chose it in their settings.)"
+    else:
+        note += f"\n(Reply in {dialog.reply_language(history)}, the language of the user's latest message, unless the user asked for a specific language.)"
+    msgs[-1] = {"role": "user", "content": f"<sources>\n{context}\n</sources>\n\nQuestion: {last}{note}"}
     return msgs
 
 
@@ -186,7 +198,9 @@ def _post(payload: dict, stream: bool, timeout: float = 120, p: dict | None = No
             raise ClaudeError("המודל עמוס כרגע אצל הספק. נסה שוב בעוד דקה.", e.code) from None
         raise ClaudeError(f'{p["label"] if p else "LLM"} API {e.code}: {msg}', e.code) from None
     except urllib.error.URLError as e:
-        raise ClaudeError(f"Cannot reach the model API: {e.reason}") from None
+        raise ClaudeError("לא הצלחתי להגיע למודל. נסה שוב בעוד רגע.", 503) from e
+    except (TimeoutError, OSError) as e:  # "The read operation timed out" while waiting for the first byte
+        raise ClaudeError("המודל לא הגיב בזמן. נסה שוב בעוד רגע.", 504) from e
 
 
 def stream_answer(system: str, messages: list[dict], max_tokens: int = 1800) -> Iterator[str]:

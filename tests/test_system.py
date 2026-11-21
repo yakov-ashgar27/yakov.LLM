@@ -592,3 +592,58 @@ console.log(JSON.stringify({ n: hits.length, first: hits[0].path, kind: hits[0].
     assert out.returncode == 0, out.stderr
     r = json.loads(out.stdout)
     assert r["n"] >= 1 and r["first"] == "job.txt" and r["kind"] == "upload" and r["supported"] == [True, True, False]
+
+
+def test_reply_language_follows_the_latest_message():
+    from yakovllm.dialog import reply_language
+    assert reply_language([{"role": "user", "content": "מה זה FitVision?"}, {"role": "assistant", "content": "..."},
+                           {"role": "user", "content": "Yes"}]) == "English"
+    assert reply_language([{"role": "user", "content": "Tell me about Bomberman"}, {"role": "user", "content": "2"}]) == "English"
+    assert reply_language([{"role": "user", "content": "תסביר את ה-API של guardstream"}]) == "Hebrew"
+
+
+OPTIONS_ANSWER = """מעולה! על מה תרצה שנתמקד?
+
+1. **חישוב זוויות המפרקים** – איך MediaPipe מנתח את ה-Pose
+2. **ארכיטקטורת ה-Offline Sync** – איך ה-PWA שומר אימונים
+3. **תשתית ה-CI** – איך ה-Backend נבדק
+
+מה הכי מעניין אותך?"""
+
+
+def test_a_number_picks_the_option_from_the_last_answer(app):
+    from yakovllm.dialog import resolve_choice
+    convo = [{"role": "user", "content": "ספר לי על FitVision"}, {"role": "assistant", "content": OPTIONS_ANSWER}]
+    for pick in ("2", "2.", "אפשרות 2", "השני", "the second one", "option 2"):
+        assert resolve_choice(convo + [{"role": "user", "content": pick}])[0] == 2, pick
+    assert resolve_choice(convo + [{"role": "user", "content": "ספר לי על 2 פרויקטים"}]) is None
+    _, url = app
+    FakeClaude.seen.clear()
+    events = _sse(url + "/api/chat", {"messages": convo + [{"role": "user", "content": "2"}]})
+    sent = FakeClaude.seen[-1]["messages"][-1]["content"]
+    assert 'picked option 2' in sent and "Offline Sync" in sent and "Reply in Hebrew" in sent
+    assert all(s["repo"] == "fitvision-ai" for s in events[0][1]["sources"])
+
+
+def test_temporary_chat_feedback_and_forget_me(app, tmp_path):
+    server, url = app
+    from yakovllm.memory import Memory
+    server.MEMORY = Memory(tmp_path / "m.json")
+    _sse(url + "/api/chat", {"visitor": "v1", "chat": "t1", "temporary": True,
+                             "messages": [{"role": "user", "content": "my secret plan is X"}]})
+    assert server.MEMORY.export()["visitors"] == 0  # a temporary chat leaves no trace
+    FakeClaude.seen.clear()
+    _sse(url + "/api/chat", {"visitor": "v1", "chat": "c1", "name": "Dana", "instructions": "Answer in 3 bullets",
+                             "messages": [{"role": "user", "content": "What is Bomberman?"}]})
+    system = FakeClaude.seen[-1]["system"]
+    assert "Dana" in system and "Answer in 3 bullets" in system and "<user_instructions>" in system
+
+    def post(path, body):
+        req = urllib.request.Request(url + path, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        return json.load(urllib.request.urlopen(req))
+    assert post("/api/feedback", {"visitor": "v1", "chat": "c1", "vote": "up", "question": "q", "answer": "a"})["ok"]
+    me = post("/api/memory/me", {"visitor": "v1"})
+    assert me["known"] and me["names"] == ["Dana"] and me["conversations"] == 1
+    assert server.MEMORY.export()["people"][0]["feedback"][0]["vote"] == "up"
+    assert post("/api/memory/forget", {"visitor": "v1"})["ok"]
+    assert post("/api/memory/me", {"visitor": "v1"}) == {"known": False}

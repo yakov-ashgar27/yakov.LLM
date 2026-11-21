@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import extract, llm, tokenizer
+from . import dialog, extract, llm, tokenizer
 from .memory import Memory
 from .search import Index
 from .sync import GitHubSync
@@ -125,11 +125,15 @@ def source_payload(index: Index, hits) -> list[dict]:
 
 
 def retrieval_query(messages: list[dict]) -> tuple[str, str]:
-    """(latest question, text to search). Short follow-ups borrow the previous question."""
+    """(latest question, text to search). Short follow-ups borrow the previous question;
+    "2" after a numbered list means that option's text."""
     users = [str(m["content"]) for m in messages if m.get("role") == "user" and m.get("content")]
     if not users:
         return "", ""
     q = users[-1]
+    choice = dialog.resolve_choice(messages)
+    if choice:
+        return q, f"{choice[1]} {users[-2] if len(users) > 1 else ''}".strip()
     if len(users) > 1 and len(tokenizer.tokenize(q)) < 6:
         return q, f"{users[-2]} {q}"
     return q, q
@@ -245,6 +249,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.sync_now()
             if p == "/api/extract":
                 return self.extract_file()
+            if p == "/api/feedback":
+                d = json.loads(self._body() or b"{}")
+                ok = memory().feedback(str(d.get("visitor", "")), str(d.get("chat", "")), str(d.get("vote", "")),
+                                       str(d.get("question", "")), str(d.get("answer", "")))
+                return self._json({"ok": ok}, 200 if ok else 400)
+            if p == "/api/memory/me":
+                return self._json(memory().mine(str(json.loads(self._body() or b"{}").get("visitor", ""))))
+            if p == "/api/memory/forget":
+                return self._json({"ok": memory().forget(str(json.loads(self._body() or b"{}").get("visitor", "")))})
             if p == "/api/webhook/github":
                 return self.webhook()
         except (ValueError, json.JSONDecodeError) as e:
@@ -305,6 +318,10 @@ class Handler(BaseHTTPRequestHandler):
         visitor = str(data.get("visitor") or "")
         chat_id = str(data.get("chat") or "")[:64]
         attachments = attachment_sources(data.get("attachments"))
+        given_name = str(data.get("name") or "").strip()[:40]
+        temporary = bool(data.get("temporary"))
+        instructions = str(data.get("instructions") or "").strip()[:1500]
+        lang = {"he": "Hebrew", "en": "English"}.get(str(data.get("lang") or ""))
         question, search_text = retrieval_query(messages)
         if not question:
             return self._json({"error": "empty question"}, 400)
@@ -338,9 +355,11 @@ class Handler(BaseHTTPRequestHandler):
             mem = memory()
             titles = {r["key"]: r.get("title") or r["key"] for r in ix.kb["repos"]}
             user_text = "\n".join(str(m.get("content", ""))[:500] for m in messages if m.get("role") == "user")
-            recall = mem.context(visitor, chat_id, user_text, titles) if visitor else ""
-            if visitor:
-                mem.record(visitor, chat_id, question, projects)
+            recall = mem.context(visitor, chat_id, user_text, titles) if visitor and not temporary else ""
+            if given_name:
+                recall = (f"The user's name, from their profile: {given_name}. Use it naturally now and then, not in every answer.\n" + recall).strip()
+            if visitor and not temporary:  # a temporary chat leaves no trace
+                mem.record(visitor, chat_id, question, projects, given_name=given_name)
             send("meta", {"sources": sources, "keywords": keywords, "mode": "llm" if llm.has_key() else "offline",
                           "search_ms": round((time.perf_counter() - t0) * 1000, 1)})
             if llm.has_key():
@@ -348,7 +367,11 @@ class Handler(BaseHTTPRequestHandler):
                                                   projects=llm.project_list(ix.kb["repos"]))
                 if recall:
                     system += "\n\n<visitor_memory>\n" + recall + "\n</visitor_memory>"
-                stream = llm.stream_answer(system, llm.build_messages(messages, sources))
+                if instructions:
+                    system += ("\n\n<user_instructions>\nThe user's standing preferences for how you answer (style, length, tone, "
+                               "level of detail). Follow them, but never against the rules above or the sources:\n"
+                               + instructions + "\n</user_instructions>")
+                stream = llm.stream_answer(system, llm.build_messages(messages, sources, lang=lang))
             else:
                 stream = llm.offline_answer(question, sources)
             # Run the model in a thread so we can send keep-alive comments while it thinks:

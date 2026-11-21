@@ -201,14 +201,15 @@ class Memory:
             self.status["error"] = f"save: {e}"
 
     # ---------------------------------------------------------------- recording
-    def record(self, visitor: str, chat: str, text: str, projects: list[str], now: float | None = None) -> dict:
+    def record(self, visitor: str, chat: str, text: str, projects: list[str], now: float | None = None,
+               given_name: str = "") -> dict:
         """Store one user message. Returns what was learned: {"name": ..., "note": bool}."""
         visitor = re.sub(r"[^\w\-]", "", visitor or "")[:64]
         if not visitor:
             return {}
         now = now or time.time()
         text = str(text).strip()[:2000]
-        name = detect_name(text)
+        name = detect_name(text) or (given_name.strip()[:30] or None)
         note = is_statement(text) and not (name and len(text.split()) <= 5)  # "hi, I'm Dana" is not a claim
         with self.lock:
             vs = self.data["visitors"]
@@ -276,6 +277,38 @@ class Memory:
                                  "remember a conversation with someone by that name, but never reveal what was said in it.")
         return "\n".join(lines)
 
+    # ---------------------------------------------------------------- the visitor's own data
+    def feedback(self, visitor: str, chat: str, vote: str, question: str, answer: str) -> bool:
+        visitor = re.sub(r"[^\w\-]", "", visitor or "")[:64]
+        if not visitor or vote not in ("up", "down"):
+            return False
+        with self.lock:
+            v = self.data["visitors"].setdefault(visitor, {"first": time.time(), "last": time.time(), "names": [], "chats": [],
+                                                           "projects": {}, "questions": [], "notes": []})
+            v["feedback"] = (v.get("feedback", []) + [{"t": time.time(), "chat": chat[:64], "vote": vote,
+                                                        "question": str(question)[:300], "answer": str(answer)[:600]}])[-50:]
+        self._schedule()
+        return True
+
+    def mine(self, visitor: str) -> dict:
+        """What yakov.LLM remembers about this visitor, for the "what do you remember about me?" screen."""
+        visitor = re.sub(r"[^\w\-]", "", visitor or "")[:64]
+        with self.lock:
+            v = json.loads(json.dumps(self.data["visitors"].get(visitor) or {}))
+        if not v:
+            return {"known": False}
+        return {"known": True, "names": v.get("names", []), "first": _day(v["first"]), "last": _day(v["last"]),
+                "conversations": len(v.get("chats", [])), "projects": sorted(v.get("projects", {}), key=lambda p: -v["projects"][p]),
+                "questions": [q["text"] for q in v.get("questions", [])][-10:], "notes": [n["text"] for n in v.get("notes", [])][-10:]}
+
+    def forget(self, visitor: str) -> bool:
+        visitor = re.sub(r"[^\w\-]", "", visitor or "")[:64]
+        with self.lock:
+            gone = self.data["visitors"].pop(visitor, None) is not None
+        if gone:
+            self._schedule()
+        return gone
+
     # ---------------------------------------------------------------- admin
     def export(self) -> dict:
         with self.lock:
@@ -285,6 +318,7 @@ class Memory:
             people.append({"visitor": k, "names": v["names"], "first": _day(v["first"]), "last": _day(v["last"]),
                            "conversations": len(v["chats"]), "projects": v["projects"],
                            "notes": [{**n, "day": _day(n["t"])} for n in v["notes"]],
+                           "feedback": [{**f, "day": _day(f["t"])} for f in v.get("feedback", [])],
                            "questions": [{**q, "day": _day(q["t"])} for q in v["questions"]]})
         return {"visitors": len(people), "notes": sum(len(p["notes"]) for p in people), "storage": self.status,
                 "people": people}
