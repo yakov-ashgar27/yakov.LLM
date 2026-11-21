@@ -56,14 +56,14 @@ Each sync lists the account's public repos and compares each repo's `pushed_at` 
 
 ## Results
 
-Retrieval measured on [38 questions](eval/questions.json) (20 in Hebrew, 18 in English) over 5 repos, 238 files and 602 chunks. A question is a hit when the file that holds the answer is in the top results.
+Retrieval measured on [38 questions](eval/questions.json) (20 in Hebrew, 18 in English) over 11 repos, 750 files and about 7,200 chunks. A question is a hit when the file that holds the answer is in the top results.
 
 | Setup | Hit@1 | Hit@5 | MRR | Hit@5 Hebrew | Hit@5 English | ms/query |
 | --- | --- | --- | --- | --- | --- | --- |
-| BM25 (plain tokens) | 50% | 79% | 0.60 | 70% | 89% | 0.4 |
-| BM25 + Hebrew→English glossary | 53% | **87%** | **0.67** | **85%** | 89% | 0.6 |
+| BM25 (plain tokens) | 45% | 76% | 0.57 | 75% | 78% | 1.0 |
+| BM25 + Hebrew→English glossary | 50% | **89%** | **0.65** | **95%** | 83% | 1.4 |
 
-The glossary raised Hebrew recall from 70% to 85%. These numbers don't include the model keyword rewrite, which needs an API key at evaluation time. `python eval/run_eval.py` prints the table and lists the misses.
+The glossary raises Hebrew recall from 75% to 95%. These numbers don't include the model keyword rewrite, which needs an API key at evaluation time. `python eval/run_eval.py` prints the table and lists the misses.
 
 ### Everyday questions
 
