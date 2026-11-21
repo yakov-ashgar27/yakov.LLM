@@ -288,6 +288,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       main.addEventListener('drop', async (e) => { e.preventDefault(); depth = 0; main.classList.remove('dropping'); this.addFiles(await window.YakovFiles.fromDrop(e.dataTransfer)); });
       $('#chat-title').addEventListener('click', () => this.current && this.startRename(this.current.id, $('#chat-title')));
       $('#chat-title').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === 'F2') && this.current) { e.preventDefault(); this.startRename(this.current.id, $('#chat-title')); } });
+      if (window.YAKOV_EMBEDDED) $('#export').hidden = true;  // sandboxed hosts block downloads
       $('#export').addEventListener('click', () => this.exportChat());
       $('#to-bottom').addEventListener('click', () => { $('#scroller').scrollTo({ top: 1e9, behavior: 'smooth' }); });
       $('#scroller').addEventListener('scroll', () => { const s = $('#scroller'); $('#to-bottom').classList.toggle('show', s.scrollHeight - s.scrollTop - s.clientHeight > 400); }, { passive: true });
