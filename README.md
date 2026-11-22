@@ -41,7 +41,9 @@ flowchart LR
 5. **Your files too.** Attach files or a whole folder (Word, PDF, PowerPoint, Excel, text, code). They are read into text (Office files in the browser, PDF on the server), searched with the same engine, and their best passages go to the model next to the project sources. So you can ask "which project fits this job description?".
 6. **Memory.** The app remembers who it talked with (a random id the browser keeps, plus a name if one is given) and their earlier questions, so a returning visitor is greeted with context. What people *claim* is stored as an unverified note for Yakov to review on `/admin.html`, and never becomes part of the knowledge base. A name from another device only reveals that someone by that name talked before, never what they said.
 7. **A real chat app.** Answers reply in the language you write in (or the one you pick), and a reply of just "2" picks option 2 of the last answer. Sources stay folded under each answer. Long-press a chat to rename, pin, save or delete it; search all chats; temporary chats that are neither saved nor remembered; a profile with name and photo; standing instructions ("answer in 3 bullets"); 👍/👎; read aloud; voice typing; select text in an answer to ask about it; a "what do you remember about me?" screen with a delete button; drafts that survive closing the app. Zip files and very long pastes become attachments.
-8. **Stay current.** See below.
+8. **Folders.** Like Projects in the big chat apps: a folder has a name, its own instructions and up to 200 files (lectures, exercises, PDFs, slides, a whole directory or a zip). Every chat opened in it answers from those files, and its chats live inside it. Folders and chats can be pinned.
+9. **Fast and thorough.** The model is asked to think as little as it allows (retrieval already did the hard work), gets fewer, tighter excerpts, and a ping every 10 minutes keeps the free server awake, so answers start in seconds. Answers are detailed and end with 2-3 numbered follow-ups you can tap or pick by number.
+10. **Stay current.** See below.
 
 ![A citation opens the exact lines](docs/screenshot-source.png)
 
@@ -124,7 +126,7 @@ Settings are in [`.env.example`](.env.example).
 pip install pytest && python -m pytest -q
 ```
 
-There are 46 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against fake Claude and OpenAI-compatible servers that speak their streaming protocols, webhook signatures, rate limiting, CORS for the static demo, identical Python and JavaScript search results on every evaluation question, the fact extractor, reply language and numbered-option picks, temporary chats, feedback and "forget me", memory (recall, unverified notes, never touching the knowledge base, name-only recall across devices), attachments and Word/PowerPoint/Excel/PDF extraction, and guards that fail CI if Hit@5 drops below 80% or the auto-generated symbol questions drop below 90%.
+There are 48 tests. They cover the tokenizer, the chunker (line numbers must match the source exactly), BM25 ranking, and GitHub sync against real temporary git repos (add, update, remove, and network failure). They also cover the HTTP API against fake Claude and OpenAI-compatible servers that speak their streaming protocols, webhook signatures, rate limiting, CORS for the static demo, identical Python and JavaScript search results on every evaluation question, the fact extractor, reply language and numbered-option picks, temporary chats, feedback and "forget me", memory (recall, unverified notes, never touching the knowledge base, name-only recall across devices), attachments and Word/PowerPoint/Excel/PDF extraction, and guards that fail CI if Hit@5 drops below 80% or the auto-generated symbol questions drop below 90%.
 
 ## Design decisions
 

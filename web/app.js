@@ -25,6 +25,7 @@
     up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10v11H4V10zM7 10l4-8a2.5 2.5 0 0 1 2.5 2.5V9h5.6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 17.7 21H7"/></svg>',
     down2: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14V3h3v11zM17 14l-4 8a2.5 2.5 0 0 1-2.5-2.5V15H4.9a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 6.3 3H17"/></svg>',
     speak: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+    folder: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
     edit: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
     clip: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6L15 7.1"/></svg>',
     file: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
@@ -52,6 +53,14 @@
       } catch { return null; }
     },
   };
+
+  // Folders (like Projects in the big chat apps): a name, instructions, many files, and their own chats.
+  const folderStore = {
+    key: 'yakovllm.folders.v1',
+    load() { try { return JSON.parse(localStorage.getItem(this.key) || '[]'); } catch { return []; } },
+    save(list) { try { localStorage.setItem(this.key, JSON.stringify(list)); } catch { /* quota */ } },
+  };
+  const FOLDER_FILES = (id) => 'folder:' + id;
 
   // The user's profile and preferences, kept on this device.
   const Profile = {
@@ -117,10 +126,10 @@
       const r = await fetch(this.url('api/sync'), { method: 'POST' });
       if (!r.ok) throw new Error((await r.json()).error || 'sync failed');
     },
-    async chat({ messages, repo, signal, onMeta, onDelta, attachments, chatId, temporary }) {
+    async chat({ messages, repo, signal, onMeta, onDelta, attachments, chatId, temporary, folder }) {
       const res = await fetch(this.url('api/chat'), {
         method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: messages.map(({ role, content }) => ({ role, content })), repo, attachments, visitor: VISITOR, chat: chatId, name: Profile.get().name || undefined, lang: Profile.get().lang || undefined, instructions: Profile.get().instructions || undefined, temporary: !!temporary }),
+        body: JSON.stringify({ messages: messages.map(({ role, content }) => ({ role, content })), repo, attachments, visitor: VISITOR, chat: chatId, name: Profile.get().name || undefined, lang: Profile.get().lang || undefined, instructions: Profile.get().instructions || undefined, temporary: !!temporary, folder: folder || undefined }),
       });
       if (res.status === 429) throw new Error('יותר מדי שאלות בזמן קצר. נסה שוב בעוד כמה דקות.');
       if (!res.ok || !res.body) throw new Error('השרת לא הגיב (' + res.status + ').');
@@ -145,7 +154,7 @@
 Projects:
 ${kb.repos.map((r) => { const loc = r.loc || {}; const total = Object.values(loc).reduce((a, b) => a + b, 0); return `- ${r.title} (${r.key}; updated ${(r.pushed_at || r.committed_at || '').slice(0, 10)}; languages: ${Object.keys(loc).join(', ')}; ${total} lines of code): ${(r.summary || r.description || '').slice(0, 220)}`; }).join('\n')}
 
-Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bold the key fact), then details in short paragraphs, bullets, a table when comparing, code blocks with a language tag. Sources with repo="upload" are files the user attached: use them and connect them to the projects when asked. What users tell you is an unverified claim, never a project fact. The project list above is current and complete: use it directly for which projects exist, the newest one, languages and lines of code. Never say you don't know when the list or the sources contain the answer. Answer about the project the question or the conversation is about. Reply in the language of the user's latest question (Hebrew or English; keep code and file names in English). Base every claim about the projects on the numbered <source> excerpts and cite them inline as [1], [2]. Never invent files, numbers or features; if the sources don't answer, say so and suggest where to look. Be concrete: name files and functions, use fenced code blocks with a language tag. Lead with the direct answer, keep it tight. Plain Markdown only: no LaTeX or $...$ math; write symbols like ≤ × → directly.`;
+Rules: sound like a warm, sharp senior engineer. Be generous with detail: open with the direct answer (bold the key fact), then explain how it works and why, with files, functions and a short snippet when useful (usually 150-400 words); short paragraphs, bullets, a table when comparing, code blocks with a language tag. End every substantive answer with a line offering more ('**רוצה שאפרט על:**' or '**Want me to go deeper into:**'), 2-3 numbered specific follow-ups, and a one-line question; the user may reply with just the number. Sources with repo="upload" are files the user attached: use them and connect them to the projects when asked. What users tell you is an unverified claim, never a project fact. The project list above is current and complete: use it directly for which projects exist, the newest one, languages and lines of code. Never say you don't know when the list or the sources contain the answer. Answer about the project the question or the conversation is about. Reply in the language of the user's latest question (Hebrew or English; keep code and file names in English). Base every claim about the projects on the numbered <source> excerpts and cite them inline as [1], [2]. Never invent files, numbers or features; if the sources don't answer, say so and suggest where to look. Be concrete: name files and functions, use fenced code blocks with a language tag. Lead with the direct answer, keep it tight. Plain Markdown only: no LaTeX or $...$ math; write symbols like ≤ × → directly.`;
 
   const BrowserBackend = {
     kind: 'browser',
@@ -187,7 +196,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     },
     async refresh() {},
     async syncNow() { throw new Error('בגרסה הזו מאגר הידע מתעדכן אוטומטית על ידי GitHub Action.'); },
-    async chat({ messages, repo, signal, onMeta, onDelta, onReplace, attachments }) {
+    async chat({ messages, repo, signal, onMeta, onDelta, onReplace, attachments, folder }) {
       const users = messages.filter((m) => m.role === 'user');
       const q = users[users.length - 1].content;
       let searchText = q;
@@ -197,7 +206,9 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       const t0 = performance.now();
       const earlier = messages.slice(0, -1).slice(-4).map((m) => String(m.content || '').slice(0, 600)).join(' ');
       const contextRepos = earlier ? this.index.tok.detectRepos(earlier) : [];
-      const hits = this.index.answerContext(searchText, { k: attachments && attachments.length ? 6 : 8, repo, contextRepos });
+      // In a folder, the folder's files are the knowledge; the GitHub projects only when the question names one.
+      const skipKb = folder && !repo && !this.index.tok.detectRepos(searchText).length;
+      const hits = skipKb ? [] : this.index.answerContext(searchText, { k: attachments && attachments.length ? 6 : 8, repo, contextRepos });
       const files = (attachments || []).map((a) => ({ ...a, id: 'upload:' + a.name + ':' + a.start, repo: 'upload', path: a.name, title: '📎 ' + a.name, kind: 'upload', score: 0, terms: [], url: '' }));
       const sources = files.concat(hits.map((h) => ({ ...h.chunk, score: +h.score.toFixed(3), terms: h.terms, url: this.index.githubUrl(h.chunk) }))).map((x, i) => ({ ...x, n: i + 1 }));
       onMeta({ sources, mode: this.sample ? 'claude' : 'offline', search_ms: +(performance.now() - t0).toFixed(1) });
@@ -205,7 +216,8 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
         const ctx = sources.map((s) => `<source n="${s.n}" repo="${s.repo}" path="${s.path}" lines="${s.start}-${s.end}">\n${s.text}\n</source>`).join('\n\n');
         const history = messages.slice(-11, -1).filter((m) => m.content).map(({ role, content }) => ({ role, content: content.slice(0, 6000) }));
         while (history.length && history[0].role !== 'user') history.shift();
-        const instr = Profile.get().instructions ? `\n\nThe user's standing preferences for how you answer (never against the rules or the sources): ${Profile.get().instructions}` : '';
+        const instr = (Profile.get().instructions ? `\n\nThe user's standing preferences for how you answer (never against the rules or the sources): ${Profile.get().instructions}` : '')
+          + (folder ? `\n\nThis conversation is in the user's folder "${folder.name}" (${folder.files} files). Answer mainly from the folder's files (sources with repo="upload"); general knowledge is fine when marked as such.${folder.instructions ? ' Folder instructions: ' + folder.instructions : ''}` : '');
         const input = history.concat([{ role: 'user', content: `${BROWSER_SYSTEM(this.kb)}${instr}\n\n<sources>\n${ctx || '(no matching excerpts)'}\n</sources>\n\nQuestion: ${q}${choice ? `\n(The user picked option ${choice[0]} from your previous message: "${choice[1]}". Answer that option fully now; don't ask again.)` : ''}\n(Reply in ${Profile.get().lang === 'en' ? 'English' : Profile.get().lang === 'he' ? 'Hebrew' : Dialog.lang(messages)}${Profile.get().name ? `; the user's name is ${Profile.get().name}` : ''}, the language of the user's latest message, unless the user asked for a specific language.)` }]);
         // sample() reports the WHOLE answer so far on every update, so we replace rather than append.
         const show = (text) => { if (text && !/^Thinking\.*$/.test(text.trim())) onReplace(text); };
@@ -300,7 +312,9 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     const tail = String(m.content).trim().split('\n').slice(-3).join(' ');
     if (opts.length >= 2 && opts.length <= 5 && /[?？]/.test(tail)) return opts.map((t, i) => ({ opt: i + 1, text: t.length > 70 ? t.slice(0, 68).replace(/\s+\S*$/, '') + '…' : t, send: t }));
     let ideas;
-    if (hasFiles) ideas = en ? ['Summarize the attached file in 5 bullets', 'Which of the projects best matches this file?', 'What is missing in the file compared to the projects?']
+    if (chat.folder) ideas = en ? ['Summarize the key ideas of this material', 'Give me 5 exam-style practice questions with answers', 'Explain the hardest concept here with an example']
+      : ['סכם את הרעיונות המרכזיים בחומר', 'תן לי 5 שאלות תרגול בסגנון מבחן, עם תשובות', 'הסבר את המושג הכי קשה כאן עם דוגמה'];
+    else if (hasFiles) ideas = en ? ['Summarize the attached file in 5 bullets', 'Which of the projects best matches this file?', 'What is missing in the file compared to the projects?']
       : ['סכם את הקובץ המצורף ב-5 נקודות', 'איזה מהפרויקטים הכי מתאים למה שכתוב בקובץ?', 'מה חסר בקובץ לעומת מה שיש בפרויקטים?'];
     else if (r && r.key !== UI.backend.owner) {
       const t = shortTitle(r);
@@ -321,6 +335,9 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     streaming: null,
     repo: '',
     files: [],          // attachments of the open chat (kept in IndexedDB)
+    folders: [],        // folders, like Projects
+    folder: null,       // the folder in view, or of the open chat
+    folderFiles: [],    // that folder's files
     pendingFiles: [],   // attached before the chat has an id
 
     async start() {
@@ -328,11 +345,13 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if ((store.pref('theme') || 'system') === 'system') this.applyTheme('system'); });
       this.applyProfile();
       this.chats = store.load();
+      this.folders = folderStore.load();
       this.bind();
       this.backend = await pickBackend();
       this.renderProjects();
       this.updateStatus();
       this.renderHistory();
+      this.renderFolders();
       const last = this.chats[0];
       if (last && last.messages.length && store.pref('reopen') === last.id) this.open(last.id); else this.newChat();
       if (this.backend.kind === 'server') setInterval(() => this.backend.refresh().then(() => { this.updateStatus(); this.renderProjects(); }).catch(() => {}), 60000);
@@ -347,6 +366,8 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       this.bindSettings();
       this.enableBrowserMic();
       $('#temp-btn').addEventListener('click', () => this.toggleTemporary());
+      $('#new-folder').addEventListener('click', () => this.newFolder());
+      $('#crumb').addEventListener('click', () => { if (this.folder) this.openFolder(this.folder.id); });
       // select text in an answer -> "ask about this"
       const quote = document.createElement('button');
       quote.className = 'quote-btn'; quote.hidden = true;
@@ -586,6 +607,163 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       } catch { box.innerHTML = '<span>לא הצלחתי לטעון את הזיכרון.</span>'; }
     },
 
+    // ---- folders
+    saveFolders() { folderStore.save(this.folders); this.renderFolders(); },
+    saveFolderFiles(f) {
+      const ready = this.folderFiles.filter((x) => x.status === 'ready');
+      f.fileCount = ready.length;
+      f.updated = Date.now();
+      window.YakovFiles.DB.put(FOLDER_FILES(f.id), ready.map((x) => ({ ...x })));
+      this.saveFolders();
+      if (this.inFolderView()) this.renderFolderView();
+    },
+    renderFolders() {
+      const box = $('#folders');
+      if (!this.folders.length) { box.innerHTML = '<p class="empty-folders">קבצים ושיחות של נושא אחד, במקום אחד.</p>'; return; }
+      const list = [...this.folders].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updated || 0) - (a.updated || 0));
+      box.innerHTML = list.map((f) => {
+        const n = this.chats.filter((c) => c.folder === f.id).length;
+        return `<div class="chat-item folder-item" role="listitem" data-folder-row="${f.id}" ${this.folder && this.folder.id === f.id ? 'aria-current="true"' : ''}>
+          <span class="ico">${ICON.folder}</span>
+          <button class="chat-open" style="all:unset;flex:1;min-width:0;cursor:pointer"><span style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" dir="auto">${esc(f.name)}</span></button>
+          ${f.pinned ? `<span class="pin" aria-hidden="true">${ICON.pin}</span>` : ''}<span class="cnt">${n || ''}</span>
+          <button class="more" data-fmore="${f.id}" aria-label="אפשרויות לתיקייה ${esc(f.name)}" title="אפשרויות">${ICON.more}</button></div>`;
+      }).join('');
+      box.querySelectorAll('[data-folder-row]').forEach((row) => this.bindLongPress(row, () => this.folderActions(row.dataset.folderRow), () => { this.openFolder(row.dataset.folderRow); this.closeSidebar(); }));
+      box.querySelectorAll('[data-fmore]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); this.folderActions(b.dataset.fmore); }));
+    },
+    newFolder() {
+      this.sheet('תיקייה חדשה', `<form id="folder-form"><input type="text" id="folder-name" maxlength="60" dir="auto" placeholder="למשל: תקשורת, מבחנים, קורות חיים" aria-label="שם התיקייה">
+        <div class="row"><button type="button" class="btn" data-sheet-close>ביטול</button><button class="btn primary">יצירה</button></div></form>`);
+      $('#folder-form').onsubmit = (e) => {
+        e.preventDefault();
+        const name = $('#folder-name').value.replace(/\s+/g, ' ').trim();
+        if (!name) return;
+        const f = { id: 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name, created: Date.now(), updated: Date.now(), instructions: '', fileCount: 0 };
+        this.folders.push(f);
+        this.saveFolders();
+        this.closeSheet();
+        this.openFolder(f.id);
+        this.closeSidebar();
+      };
+    },
+    async openFolder(id, keepChat) {
+      const f = this.folders.find((x) => x.id === id);
+      if (!f) return;
+      if (!keepChat) { this.current = null; this.files = []; this.pendingFiles = []; this.temporary = false; }
+      const switching = !this.folder || this.folder.id !== f.id;
+      this.folder = f;
+      if (switching) this.folderFiles = [];
+      if (switching && f.fileCount) {
+        const files = await window.YakovFiles.DB.get(FOLDER_FILES(f.id));
+        if (this.folder === f) this.folderFiles = files;
+      }
+      this.updateCrumb();
+      if (!keepChat) {
+        this.setScope('');
+        $('#thread').innerHTML = '';
+        $('#welcome').hidden = true;
+        $('#chat-title').textContent = '';
+        this.renderFolderView();
+        this.updateTempUI();
+        $('#scroller').scrollTop = 0;
+      }
+      this.renderFolders();
+      this.renderHistory();
+    },
+    leaveFolder() {
+      this.folder = null;
+      this.folderFiles = [];
+      $('#folder-view').hidden = true;
+      this.updateCrumb();
+      this.renderFolders();
+    },
+    updateCrumb() {
+      const inFolder = !!this.folder;
+      $('#scope').hidden = inFolder;  // project scope means nothing inside a folder
+      $('#input').placeholder = this.inFolderView() ? `שיחה חדשה בתיקייה "${this.folder.name}"…` : inFolder ? `שאל על החומר של "${this.folder.name}"…` : 'שאל על הקוד, על ההחלטות או איך להריץ…';
+      const c = $('#crumb');
+      c.hidden = !(this.folder && this.current);
+      if (!c.hidden) c.innerHTML = `${ICON.folder}<span dir="auto">${esc(this.folder.name)}</span>`;
+    },
+    renderFolderView() {
+      const f = this.folder, v = $('#folder-view');
+      v.hidden = false;
+      const chats = this.chats.filter((c) => c.folder === f.id);
+      v.innerHTML = `<div class="fv-head"><span class="fv-icon">${ICON.folder}</span><div><h1 dir="auto">${esc(f.name)}</h1>
+          <p>${f.fileCount || 0} קבצים · ${chats.length} שיחות · כל שיחה כאן עונה מתוך הקבצים של התיקייה</p></div></div>
+        <div class="fv-card"><h2>${ICON.clip}<span class="grow">קבצים ומקורות</span>
+          <button class="btn small" data-fv="files">הוספת קבצים</button><button class="btn small" data-fv="dir">הוספת תיקייה</button></h2>
+          <div class="fv-files" id="fv-files"></div></div>
+        <div class="fv-card"><h2><span class="grow">הוראות לתיקייה</span></h2>
+          <textarea id="fv-instr" rows="2" maxlength="1500" dir="auto" placeholder="למשל: אלה ההרצאות בקורס תקשורת. תסביר כמו מתרגל, ותן דוגמאות למבחן.">${esc(f.instructions || '')}</textarea></div>
+        <div class="fv-card"><h2><span class="grow">שיחות בתיקייה</span></h2>
+          <div class="fv-chats">${chats.length ? chats.map((c) => `<button class="fv-chat" data-fv-chat="${c.id}">${c.pinned ? ICON.pin : ''}<span class="t" dir="auto">${esc(c.title)}</span><span class="w">${ago(new Date(c.updated || c.created).toISOString())}</span></button>`).join('')
+            : '<p class="fv-empty">עדיין אין שיחות. כתוב שאלה למטה כדי לפתוח שיחה ראשונה בתיקייה.</p>'}</div></div>`;
+      this.renderFolderFiles();
+      v.onclick = (e) => {
+        const b = e.target.closest('[data-fv]');
+        if (b) $(b.dataset.fv === 'dir' ? '#folder-input' : '#file-input').click();
+        const c = e.target.closest('[data-fv-chat]');
+        if (c) this.open(c.dataset.fvChat);
+        const rm = e.target.closest('[data-rm]');
+        if (rm) this.removeFile(rm.dataset.rm);
+        const op = e.target.closest('[data-open-file]');
+        if (op) { const x = this.folderFiles.find((y) => y.name === op.dataset.openFile); if (x && x.text) this.openDrawer({ repo: '📎', path: x.name, start: 1, end: 1, kind: 'upload', text: x.text.slice(0, 60000), url: '' }); }
+      };
+      $('#fv-instr').onchange = (e) => { f.instructions = e.target.value.trim().slice(0, 1500); this.saveFolders(); toast('ההוראות נשמרו'); };
+    },
+    renderFolderFiles() {
+      const box = $('#fv-files');
+      if (!box) return;
+      const files = this.folderFiles;
+      box.innerHTML = files.length ? files.map((x) => `<span class="att ${x.status || 'ready'}" title="${esc(x.error || x.name)}">
+        <button class="att-open" data-open-file="${esc(x.name)}" ${x.status && x.status !== 'ready' ? 'disabled' : ''}>${x.status === 'reading' ? '<i class="spin"></i>' : ICON.file}
+        <span class="nm" dir="auto">${esc(x.name.split('/').pop())}</span><span class="sz" dir="ltr">${x.status === 'error' ? esc(x.error) : fmtSize(x.size || 0)}</span></button>
+        <button class="att-x" data-rm="${esc(x.name)}" aria-label="הסרת ${esc(x.name)}">${ICON.x}</button></span>`).join('')
+        : '<p class="fv-empty">גרור לכאן הרצאות, תרגולים, סיכומים או תיקייה שלמה: PDF, Word, PowerPoint, Excel, טקסט, קוד ו-ZIP. עד 200 קבצים.</p>';
+    },
+    folderActions(id) {
+      const f = this.folders.find((x) => x.id === id);
+      if (!f) return;
+      if (navigator.vibrate) try { navigator.vibrate(12); } catch { /* ignore */ }
+      this.sheet(f.name, `
+        <button class="act" data-a="rename">${ICON.edit}<span>שינוי שם</span></button>
+        <button class="act" data-a="pin">${ICON.pin}<span>${f.pinned ? 'ביטול הצמדה' : 'הצמדה למעלה'}</span></button>
+        <button class="act danger" data-a="delete">${ICON.trash}<span>מחיקת התיקייה</span></button>`);
+      $('#sheet-body').onclick = (e) => {
+        const a = e.target.closest('[data-a]');
+        if (!a) return;
+        if (a.dataset.a === 'rename') {
+          this.sheet('שינוי שם לתיקייה', `<form id="rename-form"><input type="text" id="rename-input" maxlength="60" dir="auto" value="${esc(f.name)}" aria-label="שם התיקייה">
+            <div class="row"><button type="button" class="btn" data-sheet-close>ביטול</button><button class="btn primary">שמירה</button></div></form>`);
+          setTimeout(() => $('#rename-input').select(), 80);
+          $('#rename-form').onsubmit = (ev) => {
+            ev.preventDefault();
+            const name = $('#rename-input').value.replace(/\s+/g, ' ').trim();
+            if (name) { f.name = name; this.saveFolders(); this.updateCrumb(); if (this.inFolderView()) this.renderFolderView(); toast('השם נשמר'); }
+            this.closeSheet();
+          };
+        }
+        if (a.dataset.a === 'pin') { f.pinned = !f.pinned; this.saveFolders(); this.closeSheet(); toast(f.pinned ? 'התיקייה הוצמדה' : 'ההצמדה בוטלה'); }
+        if (a.dataset.a === 'delete') {
+          const n = this.chats.filter((c) => c.folder === f.id).length;
+          this.sheet('למחוק את התיקייה?', `<p dir="auto">"${esc(f.name)}" תימחק עם ${f.fileCount || 0} הקבצים ו-${n} השיחות שבה. אי אפשר לבטל את זה.</p>
+            <div class="row"><button class="btn" data-sheet-close>ביטול</button><button class="btn danger solid" data-a="really-delete">מחיקה</button></div>`);
+        }
+        if (a.dataset.a === 'really-delete') {
+          this.chats.filter((c) => c.folder === f.id).forEach((c) => window.YakovFiles.DB.del(c.id));
+          this.chats = this.chats.filter((c) => c.folder !== f.id); store.mem = this.chats; store.save();
+          window.YakovFiles.DB.del(FOLDER_FILES(f.id));
+          this.folders = this.folders.filter((x) => x.id !== f.id);
+          const here = this.folder && this.folder.id === f.id;
+          this.saveFolders(); this.closeSheet();
+          if (here) { this.leaveFolder(); this.newChat(); } else this.renderHistory();
+          toast('התיקייה נמחקה');
+        }
+      };
+    },
+
     // ---- action sheet (long press on a chat, like the big chat apps)
     sheet(title, html) {
       const sh = $('#sheet');
@@ -613,6 +791,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       this.sheet(c.title, `
         <button class="act" data-a="rename">${ICON.edit}<span>שינוי שם</span></button>
         <button class="act" data-a="pin">${ICON.pin}<span>${c.pinned ? 'ביטול הצמדה' : 'הצמדה למעלה'}</span></button>
+        ${this.folders.length ? `<button class="act" data-a="move">${ICON.folder}<span>העברה לתיקייה</span></button>` : ''}
         ${window.YAKOV_EMBEDDED ? '' : `<button class="act" data-a="export">${ICON.save}<span>שמירה כקובץ</span></button>`}
         <button class="act danger" data-a="delete">${ICON.trash}<span>מחיקה</span></button>`);
       $('#sheet-body').onclick = (e) => {
@@ -621,6 +800,14 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
         if (a.dataset.a === 'rename') this.renameSheet(c);
         if (a.dataset.a === 'pin') { c.pinned = !c.pinned; store.mem = this.chats; store.save(); this.renderHistory(); this.closeSheet(); toast(c.pinned ? 'השיחה הוצמדה' : 'ההצמדה בוטלה'); }
         if (a.dataset.a === 'export') { this.exportChat(c); this.closeSheet(); }
+        if (a.dataset.a === 'move') this.sheet('העברה לתיקייה', [...this.folders.map((f) => `<button class="act" data-a="to" data-to="${f.id}">${ICON.folder}<span dir="auto">${esc(f.name)}${c.folder === f.id ? ' ✓' : ''}</span></button>`),
+          c.folder ? `<button class="act" data-a="to" data-to="">${ICON.x}<span>הוצאה מהתיקייה</span></button>` : ''].join(''));
+        if (a.dataset.a === 'to') {
+          c.folder = a.dataset.to || undefined; store.mem = this.chats; store.save();
+          this.closeSheet(); this.renderHistory(); this.renderFolders();
+          if (this.current === c) this.open(c.id); else if (this.inFolderView()) this.renderFolderView();
+          toast(c.folder ? 'השיחה הועברה לתיקייה' : 'השיחה הוצאה מהתיקייה');
+        }
         if (a.dataset.a === 'delete') this.sheet('למחוק את השיחה?', `<p dir="auto">"${esc(c.title)}" תימחק מהמכשיר. אי אפשר לבטל את זה.</p>
           <div class="row"><button class="btn" data-sheet-close>ביטול</button><button class="btn danger solid" data-a="really-delete">מחיקה</button></div>`);
         if (a.dataset.a === 'really-delete') { this.remove(c.id); this.closeSheet(); toast('השיחה נמחקה'); }
@@ -648,6 +835,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
 
     // ---- chats
     newChat() {
+      if (this.folder) this.leaveFolder();
       this.current = null;
       this.temporary = false;
       setTimeout(() => this.updateTempUI());
@@ -672,6 +860,9 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       this.pendingFiles = [];
       this.renderFiles();
       if (c.fileCount) window.YakovFiles.DB.get(c.id).then((f) => { if (this.current === c) { this.files = f; this.renderFiles(); } });
+      $('#folder-view').hidden = true;
+      if (c.folder && this.folders.some((x) => x.id === c.folder)) this.openFolder(c.folder, true);
+      else if (this.folder) this.leaveFolder();
       $('#welcome').hidden = true;
       $('#chat-title').textContent = c.title;
       const th = $('#thread');
@@ -687,7 +878,13 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       this.chats = this.chats.filter((x) => x.id !== id);
       store.mem = this.chats;
       store.save();
-      if (this.current && this.current.id === id) this.newChat(); else this.renderHistory();
+      const gone = this.chats.length;  // eslint: keep for clarity
+      if (this.current && this.current.id === id) {
+        const fid = this.current.folder;
+        if (fid && this.folders.some((f) => f.id === fid)) this.openFolder(fid); else this.newChat();
+      } else { this.renderHistory(); if (this.inFolderView()) this.renderFolderView(); }
+      this.renderFolders();
+      void gone;
     },
     persist() {
       if (!this.current) return;
@@ -714,7 +911,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       for (const [label, test] of groups) {
         const q = this.query || '';
         const match = (c) => !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => String(m.content || '').toLowerCase().includes(q));
-        const items = this.chats.filter((c) => !used.has(c.id) && match(c) && test(c.updated || c.created, c));
+        const items = this.chats.filter((c) => !used.has(c.id) && (!c.folder || q) && match(c) && test(c.updated || c.created, c));
         if (!items.length) continue;
         html += `<h3>${label}</h3>`;
         for (const c of items) {
@@ -731,22 +928,24 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     },
 
     // Tap opens the chat; a long press (or right click) opens its actions. Nothing destructive happens on a tap.
-    bindLongPress(row) {
+    bindLongPress(row, onLong, onTap) {
       const id = row.dataset.chat;
+      onLong = onLong || (() => this.chatActions(id));
+      onTap = onTap || (() => { this.open(id); this.closeSidebar(); });
       let timer = 0, fired = false, x = 0, y = 0;
       const cancel = () => { clearTimeout(timer); row.classList.remove('pressing'); };
       row.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 || e.target.closest('[data-more]')) return;
         fired = false; x = e.clientX; y = e.clientY;
         row.classList.add('pressing');
-        timer = setTimeout(() => { fired = true; row.classList.remove('pressing'); this.chatActions(id); }, 480);
+        timer = setTimeout(() => { fired = true; row.classList.remove('pressing'); onLong(); }, 480);
       });
       row.addEventListener('pointermove', (e) => { if (Math.abs(e.clientX - x) > 8 || Math.abs(e.clientY - y) > 8) cancel(); });
       ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => row.addEventListener(ev, cancel));
-      row.addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); if (!fired) { fired = true; this.chatActions(id); } });
+      row.addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); if (!fired) { fired = true; onLong(); } });
       row.querySelector('.chat-open').addEventListener('click', (e) => {
         if (fired) { e.preventDefault(); fired = false; return; }
-        this.open(id); this.closeSidebar();
+        onTap();
       });
     },
 
@@ -790,7 +989,8 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
     },
 
     // ---- attachments
-    allFiles() { return this.current ? this.files : this.pendingFiles; },
+    allFiles() { return this.current ? this.files : (this.folder ? this.folderFiles : this.pendingFiles); },
+    inFolderView() { return !this.current && !!this.folder; },
     toggleAttachMenu(force) {
       const m = $('#attach-menu');
       const open = force === undefined ? m.hidden : force;
@@ -812,7 +1012,8 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       if (!ok.length) { toast(skipped ? 'הקבצים האלה לא נתמכים. אפשר לצרף טקסט, קוד, Word, PowerPoint, Excel ו-PDF.' : 'לא נמצאו קבצים'); return; }
       const room = Files.MAX_FILES - target.length;
       const batch = ok.slice(0, Math.max(0, room));
-      if (ok.length > batch.length) toast(`אפשר עד ${Files.MAX_FILES} קבצים בשיחה`);
+      if (ok.length > batch.length) toast(`אפשר עד ${Files.MAX_FILES} קבצים ${this.inFolderView() ? 'בתיקייה' : 'בשיחה'}`);
+      const folderTarget = this.inFolderView() ? this.folder : null;
       const base = this.backend.kind === 'server' ? this.backend.base : null;
       const placeholders = batch.map((f) => ({ name: f.webkitRelativePath || f.name, size: f.size, status: 'reading' }));
       for (const p of placeholders) { const i = target.findIndex((x) => x.name === p.name); if (i >= 0) target.splice(i, 1); target.push(p); }
@@ -825,6 +1026,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       });
       for (let i = 0; i < work.length; i += 4) await Promise.all(work.slice(i, i + 4).map((w) => w()));
       if (this.current && target === this.files) this.saveFiles();
+      if (folderTarget && target === this.folderFiles) this.saveFolderFiles(folderTarget);
       toast(failed ? `צורפו ${done} קבצים, ${failed} לא נקראו` : (done === 1 ? 'הקובץ צורף. אפשר לשאול עליו.' : `צורפו ${done} קבצים. אפשר לשאול עליהם.`) + (skipped ? ` (${skipped} דולגו)` : ''));
     },
     removeFile(name) {
@@ -833,6 +1035,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       if (i >= 0) t.splice(i, 1);
       this.renderFiles();
       if (this.current) this.saveFiles();
+      else if (this.folder && t === this.folderFiles) this.saveFolderFiles(this.folder);
     },
     saveFiles() {
       const ready = this.files.filter((f) => f.status === 'ready');
@@ -841,6 +1044,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       this.persist();
     },
     renderFiles() {
+      if (this.inFolderView()) { $('#attachments').hidden = true; this.renderFolderFiles(); return; }
       const files = this.allFiles();
       const box = $('#attachments');
       // Files already sent stay with the chat as sources: one compact pill; new ones show as chips.
@@ -945,7 +1149,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
         ans.innerHTML = `<div class="error-box">${esc(m.error)}</div>`;
       } else if (!m.content && live) {
         const n = (this.backend.repos || []).length;
-        const files = this.files.filter((f) => f.status === 'ready').length;
+        const files = this.files.filter((f) => f.status === 'ready').length + (this.current && this.current.folder && this.folder ? this.folderFiles.filter((f) => f.status === 'ready').length : 0);
         const status = m.sources ? 'כותב תשובה…' : (files ? `קורא ${files === 1 ? 'קובץ אחד' : files + ' קבצים'} ומחפש ב-${n} פרויקטים…` : `מחפש ב-${n} פרויקטים…`);
         ans.innerHTML = `<div class="thinking" role="status"><span class="bars"><i></i><i></i><i></i></span>${status}</div>`;
       } else {
@@ -1033,6 +1237,9 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       if (this.allFiles().some((f) => f.status === 'reading')) { toast('רגע, הקבצים עדיין נקראים…'); ta.value = text; return; }
       if (!this.current) {
         this.current = { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: chatTitle(text), created: Date.now(), updated: Date.now(), repo: this.repo, messages: [], temporary: !!this.temporary };
+        if (this.folder) { this.current.folder = this.folder.id; this.folder.updated = Date.now(); this.saveFolders(); }
+        $('#folder-view').hidden = true;
+        this.updateCrumb();
         $('#welcome').hidden = true;
         $('#thread').innerHTML = '';
         $('#chat-title').textContent = this.current.title;
@@ -1073,8 +1280,12 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       const q = (users[users.length - 1] || {}).content || '';
       const searchQ = users.length > 1 && q.split(/\s+/).length < 6 ? users[users.length - 2].content + ' ' + q : q;
       const ready = this.files.filter((f) => f.status === 'ready');
-      const attachments = window.YakovFiles.pick(ready, searchQ, 6, this.backend.tokenizer)
-        .map((c) => ({ name: c.path, start: c.start, end: c.end, text: c.text }));
+      const inFolder = chat.folder && this.folder && this.folder.id === chat.folder;
+      const folderReady = inFolder ? this.folderFiles.filter((f) => f.status === 'ready') : [];
+      const own = window.YakovFiles.pick(ready, searchQ, folderReady.length ? 3 : 6, this.backend.tokenizer);
+      const fromFolder = folderReady.length ? window.YakovFiles.pick(folderReady, searchQ, 8 - own.length, this.backend.tokenizer) : [];
+      const attachments = own.concat(fromFolder).map((c) => ({ name: c.path, start: c.start, end: c.end, text: c.text }));
+      const folder = inFolder ? { name: this.folder.name, files: folderReady.length, instructions: this.folder.instructions || '' } : null;
       const ctl = new AbortController();
       this.streaming = ctl;
       // Watchdog: if no text arrives for 110 s (the server tries up to three models), stop waiting.
@@ -1088,7 +1299,7 @@ Rules: sound like a warm, sharp senior engineer. Open with the direct answer (bo
       const paint = () => { frame = 0; this.fillBot(el, bm, true); this.scrollDown(); };
       try {
         await this.backend.chat({
-          messages: history, repo: this.repo || null, signal: ctl.signal, attachments, chatId: chat.id, temporary: chat.temporary,
+          messages: history, repo: this.repo || null, signal: ctl.signal, attachments, chatId: chat.id, temporary: chat.temporary, folder,
           onMeta: (meta) => { bm.sources = meta.sources; bm.meta = { sources: meta.sources.length, search_ms: meta.search_ms, mode: meta.mode }; paint(); },
           onDelta: (t) => { lastText = Date.now(); bm.content += t; if (!frame) frame = requestAnimationFrame(paint); },
           onReplace: (t) => { lastText = Date.now(); bm.content = t; if (!frame) frame = requestAnimationFrame(paint); },

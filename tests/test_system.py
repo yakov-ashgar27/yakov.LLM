@@ -309,7 +309,7 @@ def test_empty_answer_is_an_error_not_silence(monkeypatch):
             monkeypatch.delenv(k, raising=False)
         monkeypatch.setenv("GEMINI_API_KEY", "AIza_test")
         monkeypatch.setitem(llm.PROVIDERS["gemini"], "base", url)
-        assert llm.provider()["reasoning"] == "low"
+        assert llm.provider()["reasoning"] == "minimal"
         with pytest.raises(llm.ClaudeError, match="thinking"):
             list(llm.stream_answer("sys", [{"role": "user", "content": "q"}]))
     finally:
@@ -647,3 +647,55 @@ def test_temporary_chat_feedback_and_forget_me(app, tmp_path):
     assert server.MEMORY.export()["people"][0]["feedback"][0]["vote"] == "up"
     assert post("/api/memory/forget", {"visitor": "v1"})["ok"]
     assert post("/api/memory/me", {"visitor": "v1"}) == {"known": False}
+
+
+class FakeNoMinimal(BaseHTTPRequestHandler):
+    """A model that refuses reasoning_effort=minimal (HTTP 400) but answers with low."""
+    efforts: list = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        FakeNoMinimal.efforts.append(body.get("reasoning_effort"))
+        if body.get("reasoning_effort") == "minimal":
+            out = json.dumps({"error": {"message": "reasoning_effort minimal is not supported"}}).encode()
+            self.send_response(400)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        self.wfile.write(b'data: {"choices":[{"delta":{"content":"fast [1]."}}]}\n\ndata: [DONE]\n\n')
+
+
+def test_refused_thinking_level_retries_with_low(monkeypatch):
+    from yakovllm import llm
+    srv, url = _serve(FakeNoMinimal)
+    try:
+        for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "LLM_PROVIDER"):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv("GEMINI_API_KEY", "AIza_test")
+        monkeypatch.setitem(llm.PROVIDERS["gemini"], "base", url)
+        assert "".join(llm.stream_answer("sys", [{"role": "user", "content": "q"}])) == "fast [1]."
+        assert FakeNoMinimal.efforts[:2] == ["minimal", "low"]
+    finally:
+        srv.shutdown()
+
+
+def test_folder_chats_answer_from_the_folder_files(app):
+    _, url = app
+    FakeClaude.seen.clear()
+    events = _sse(url + "/api/chat", {"folder": {"name": "תקשורת", "files": 12, "instructions": "explain like a TA"},
+                                      "attachments": [{"name": "lecture3.pdf", "start": 1, "end": 40, "text": "TCP three-way handshake: SYN, SYN-ACK, ACK."}],
+                                      "messages": [{"role": "user", "content": "מה זה לחיצת יד משולשת?"}]})
+    sources = events[0][1]["sources"]
+    assert [s["kind"] for s in sources] == ["upload"]  # no GitHub excerpts crowding the folder's files
+    system = FakeClaude.seen[-1]["system"]
+    assert "<folder>" in system and "תקשורת" in system and "explain like a TA" in system
+    # naming a project inside a folder still brings in that project
+    events = _sse(url + "/api/chat", {"folder": {"name": "x", "files": 1}, "messages": [{"role": "user", "content": "How does Bomberman's enemy chase the player?"}]})
+    assert any(s["repo"] == "bomberman" for s in events[0][1]["sources"])

@@ -90,7 +90,7 @@ class RateLimiter:
 
 LIMITER = RateLimiter(int(os.environ.get("RATE_LIMIT", "30")))
 MEMORY: Memory | None = None
-MAX_ATTACH = 8
+MAX_ATTACH = 10
 MAX_ATTACH_CHARS = 3500
 
 
@@ -321,6 +321,7 @@ class Handler(BaseHTTPRequestHandler):
         given_name = str(data.get("name") or "").strip()[:40]
         temporary = bool(data.get("temporary"))
         instructions = str(data.get("instructions") or "").strip()[:1500]
+        folder = data.get("folder") if isinstance(data.get("folder"), dict) else None
         lang = {"he": "Hebrew", "en": "English"}.get(str(data.get("lang") or ""))
         question, search_text = retrieval_query(messages)
         if not question:
@@ -346,9 +347,13 @@ class Handler(BaseHTTPRequestHandler):
             # Projects the conversation was already about: "what was hardest there?" stays on topic.
             earlier = " ".join(str(m.get("content", ""))[:600] for m in messages[:-1][-4:])
             context = ix.detect(earlier) if earlier else []
-            hits = ix.answer_context(search_text, k=8 if not attachments else 6, repo=repo, extra_terms=keywords,
-                                     context_repos=context)
-            sources = attachments + source_payload(ix, hits)
+            # In a folder, its files are the knowledge; the GitHub projects only when the question names one.
+            if folder and not repo and not ix.detect(search_text):
+                hits = []
+            else:
+                hits = ix.answer_context(search_text, k=8 if not attachments else 6, repo=repo, extra_terms=keywords,
+                                         context_repos=context)
+            sources = (attachments + source_payload(ix, hits))[:11]  # fewer tokens in = the answer starts sooner
             for n, src in enumerate(sources, 1):
                 src["n"] = n
             projects = [repo] if repo else (ix.detect(question) or context)[:3]
@@ -367,6 +372,13 @@ class Handler(BaseHTTPRequestHandler):
                                                   projects=llm.project_list(ix.kb["repos"]))
                 if recall:
                     system += "\n\n<visitor_memory>\n" + recall + "\n</visitor_memory>"
+                if folder:
+                    system += (f'\n\n<folder>\nThis conversation is in the user\'s folder "{str(folder.get("name", ""))[:80]}" '
+                               f'({int(folder.get("files") or 0)} files: lectures, notes, documents...). Answer mainly from the '
+                               'folder\'s files (sources with repo="upload"), cite them, and connect ideas across files. General '
+                               'knowledge is welcome when clearly marked as such. The GitHub projects matter only if asked about.'
+                               + (f'\nFolder instructions: {str(folder.get("instructions", ""))[:1500]}' if folder.get("instructions") else "")
+                               + "\n</folder>")
                 if instructions:
                     system += ("\n\n<user_instructions>\nThe user's standing preferences for how you answer (style, length, tone, "
                                "level of detail). Follow them, but never against the rules above or the sources:\n"

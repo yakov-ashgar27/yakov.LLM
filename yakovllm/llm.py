@@ -34,10 +34,11 @@ Projects you know:
 How to answer:
 - Reply in the language of the user's latest message (Hebrew or English). Hebrew answers use natural, modern, friendly Hebrew; keep code, file names and identifiers in English.
 - Sound like a sharp, warm senior engineer who knows this code by heart: direct, clear, a little enthusiastic about good engineering, never stiff or salesy. Greetings and small talk get a short friendly reply and an offer of what you can show.
-- Shape every answer for easy reading: open with the direct answer in one or two sentences (bold the key fact), then the details. Use short paragraphs, `###` headings only when the answer has several parts, bullet lists for parallel items, a table when comparing things, and fenced code blocks with a language tag for code. Short questions get short answers.
-- Give a complete answer whenever you can: pick the most likely meaning and answer it. Only when a question is truly open-ended ("tell me about it", "yes", "what else?"), offer 2-4 numbered options (a bold short title and a few words each) and end with one short question; the user may answer with just the number, which means that option.
+- Be generous with detail: open with the direct answer in one or two sentences (bold the key fact), then explain it properly: how it works, why it was built that way, the files and functions involved, a short code snippet when it helps, and what is interesting or impressive about it. Aim for a rich, complete answer (usually 150-400 words), not a one-liner. Only greetings and yes/no facts stay short.
+- Make it easy to read: short paragraphs, `###` headings when the answer has several parts, bullet lists for parallel items, a table when comparing things, fenced code blocks with a language tag.
+- End every substantive answer with a short section offering more, in the reply language: a line like "**רוצה שאפרט על:**" / "**Want me to go deeper into:**", then 2-3 numbered, specific follow-ups that the sources can actually answer (for example a specific function, design decision, test or how to run it), then a one-line question such as "על מה להרחיב?". The user can reply with just the number.
+- Give a complete answer whenever you can: pick the most likely meaning and answer it fully, then offer the follow-ups. Never answer only with a list of options: even for an open question ("tell me about it", "yes", "what else?"), first give a real overview, then the numbered follow-ups.
 - If the user's message is a number or a pick ("2", "the second", "אפשרות 2"), it chooses that option from your previous message: answer it fully, never ask again.
-- When it helps, end with one short line suggesting a natural next question (in italics). Don't add it to every answer.
 - Base every factual claim about the projects on the numbered <source> excerpts in the user's message. Cite them inline as [1], [2] right after the claim, sparingly: one citation per point, not after every sentence. Never invent sources, file names, numbers or features.
 - Sources include the real code, docs and auto-generated fact cards (a function's signature, file and lines, what it calls and where it is used; a file's role and imports; a project's dependencies, run commands, tests, CI, API endpoints, database tables and settings). Combine them: answer "how does X work" from the code, "where/who uses X" from the cards, "how do I run it / what does it depend on" from the project facts.
 - If the sources don't contain the answer, say so plainly, and suggest where in the repo it might be or what to ask instead. General programming knowledge is fine when clearly marked as general.
@@ -65,10 +66,11 @@ PROVIDERS = {
              "model": "openai/gpt-oss-120b", "fast": "openai/gpt-oss-20b", "max_source_chars": 1500, "reasoning": "low",
              "fallbacks": ["openai/gpt-oss-20b"]},
     "gemini": {"label": "Gemini", "key": "GEMINI_API_KEY", "base": "https://generativelanguage.googleapis.com/v1beta/openai",
-               "model": "gemini-flash-latest", "fast": None, "max_source_chars": 2500,
-               # Gemini 3 models think before answering, and thinking counts against max_tokens:
-               # keep it short so the answer starts quickly and is never starved of tokens.
-               "reasoning": "low",
+               "model": "gemini-flash-latest", "fast": None, "max_source_chars": 1800,
+               # Gemini 3 models think before answering, and thinking counts against max_tokens.
+               # Retrieval already did the hard part, so think as little as the model allows: the
+               # answer starts in a few seconds instead of 15-30 ("low" is the fallback if refused).
+               "reasoning": "minimal",
                # Free-tier models are sometimes overloaded (HTTP 503): fall back to these, in order.
                "fallbacks": ["gemini-flash-lite-latest", "gemini-2.5-flash"]},
     "openai": {"label": "LLM", "key": "LLM_API_KEY", "base": None,
@@ -213,7 +215,14 @@ def stream_answer(system: str, messages: list[dict], max_tokens: int = 1800) -> 
     last: ClaudeError | None = None
     for i, model in enumerate(models):
         try:
-            yield from _stream_openai(p, model, system, messages, max_tokens)
+            try:
+                yield from _stream_openai(p, model, system, messages, max_tokens)
+            except ClaudeError as e:
+                # a model that doesn't accept this thinking level: retry it once with "low"
+                if e.status == 400 and p.get("reasoning") not in (None, "", "low") and not getattr(e, "streamed", False):
+                    yield from _stream_openai({**p, "reasoning": "low"}, model, system, messages, max_tokens)
+                else:
+                    raise
             return
         except ClaudeError as e:
             # Only switch models before any text was sent (the generator raises on connect).

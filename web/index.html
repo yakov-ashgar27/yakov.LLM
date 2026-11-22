@@ -35,7 +35,13 @@
       <label class="sr-only" for="chat-search">חיפוש בשיחות</label>
       <input id="chat-search" type="search" placeholder="חיפוש בשיחות" dir="auto" autocomplete="off">
     </div>
-    <nav class="history" id="history" role="list" aria-label="היסטוריית שיחות"></nav>
+    <div class="scroll-side">
+      <section class="folders" aria-label="תיקיות">
+        <div class="folders-head"><h3>תיקיות</h3><button class="icon-btn small" id="new-folder" aria-label="תיקייה חדשה" title="תיקייה חדשה"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div>
+        <div id="folders" role="list"></div>
+      </section>
+      <nav class="history" id="history" role="list" aria-label="היסטוריית שיחות"></nav>
+    </div>
     <div class="side-foot">
       <button class="profile-btn" id="profile-btn" aria-label="פרופיל והגדרות">
         <span class="avatar" id="side-avatar"></span>
@@ -63,6 +69,7 @@
 
   <main class="main">
     <div class="topbar">
+      <button class="crumb" id="crumb" hidden></button>
       <button class="icon-btn menu-btn" id="menu" aria-label="תפריט">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
       </button>
@@ -91,6 +98,7 @@
         </div>
         <div class="projects" id="projects"></div>
       </section>
+      <section class="folder-view" id="folder-view" hidden></section>
       <div class="thread" id="thread" aria-live="polite"></div>
     </div>
 
