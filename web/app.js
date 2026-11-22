@@ -154,7 +154,7 @@
 Projects:
 ${kb.repos.map((r) => { const loc = r.loc || {}; const total = Object.values(loc).reduce((a, b) => a + b, 0); return `- ${r.title} (${r.key}; updated ${(r.pushed_at || r.committed_at || '').slice(0, 10)}; languages: ${Object.keys(loc).join(', ')}; ${total} lines of code): ${(r.summary || r.description || '').slice(0, 220)}`; }).join('\n')}
 
-Rules: sound like a warm, sharp senior engineer. Be generous with detail: open with the direct answer (bold the key fact), then explain how it works and why, with files, functions and a short snippet when useful (usually 150-400 words); short paragraphs, bullets, a table when comparing, code blocks with a language tag. End every substantive answer with a line offering more ('**רוצה שאפרט על:**' or '**Want me to go deeper into:**'), 2-3 numbered specific follow-ups, and a one-line question; the user may reply with just the number. Sources with repo="upload" are files the user attached: use them and connect them to the projects when asked. What users tell you is an unverified claim, never a project fact. The project list above is current and complete: use it directly for which projects exist, the newest one, languages and lines of code. Never say you don't know when the list or the sources contain the answer. Answer about the project the question or the conversation is about. Reply in the language of the user's latest question (Hebrew or English; keep code and file names in English). Base every claim about the projects on the numbered <source> excerpts and cite them inline as [1], [2]. Never invent files, numbers or features; if the sources don't answer, say so and suggest where to look. Be concrete: name files and functions, use fenced code blocks with a language tag. Lead with the direct answer, keep it tight. Plain Markdown only: no LaTeX or $...$ math; write symbols like ≤ × → directly.`;
+Rules: if the question names projects, cover exactly those; if it asks about all of them, cover EVERY project in the list, one short section each, never stopping partway or asking whether to continue. Sound like a warm, sharp senior engineer. Be generous with detail: open with the direct answer (bold the key fact), then explain how it works and why, with files, functions and a short snippet when useful (usually 150-400 words); short paragraphs, bullets, a table when comparing, code blocks with a language tag. End every substantive answer with a line offering more ('**רוצה שאפרט על:**' or '**Want me to go deeper into:**'), 2-3 numbered specific follow-ups, and a one-line question; the user may reply with just the number. Sources with repo="upload" are files the user attached: use them and connect them to the projects when asked. What users tell you is an unverified claim, never a project fact. The project list above is current and complete: use it directly for which projects exist, the newest one, languages and lines of code. Never say you don't know when the list or the sources contain the answer. Answer about the project the question or the conversation is about. Reply in the language of the user's latest question (Hebrew or English; keep code and file names in English). Base every claim about the projects on the numbered <source> excerpts and cite them inline as [1], [2]. Never invent files, numbers or features; if the sources don't answer, say so and suggest where to look. Be concrete: name files and functions, use fenced code blocks with a language tag. Lead with the direct answer, keep it tight. Plain Markdown only: no LaTeX or $...$ math; write symbols like ≤ × → directly.`;
 
   const BrowserBackend = {
     kind: 'browser',
@@ -201,8 +201,10 @@ Rules: sound like a warm, sharp senior engineer. Be generous with detail: open w
       const q = users[users.length - 1].content;
       let searchText = q;
       const choice = Dialog.choice(messages);
+      const W = window.YakovEngine.wantsAll;
       if (choice) searchText = choice[1] + ' ' + (users.length > 1 ? users[users.length - 2].content : '');
       else if (users.length > 1 && this.index.tok.tokenize(q).length < 6) searchText = users[users.length - 2].content + ' ' + q;
+      if (users.length > 1 && W(users[users.length - 2].content) && !this.index.tok.detectRepos(q).length && q.split(/\s+/).length < 8) searchText += ' כל הפרויקטים';
       const t0 = performance.now();
       const earlier = messages.slice(0, -1).slice(-4).map((m) => String(m.content || '').slice(0, 600)).join(' ');
       const contextRepos = earlier ? this.index.tok.detectRepos(earlier) : [];
@@ -213,7 +215,8 @@ Rules: sound like a warm, sharp senior engineer. Be generous with detail: open w
       const sources = files.concat(hits.map((h) => ({ ...h.chunk, score: +h.score.toFixed(3), terms: h.terms, url: this.index.githubUrl(h.chunk) }))).map((x, i) => ({ ...x, n: i + 1 }));
       onMeta({ sources, mode: this.sample ? 'claude' : 'offline', search_ms: +(performance.now() - t0).toFixed(1) });
       if (this.sample) {
-        const ctx = sources.map((s) => `<source n="${s.n}" repo="${s.repo}" path="${s.path}" lines="${s.start}-${s.end}">\n${s.text}\n</source>`).join('\n\n');
+        const cap = sources.length > 11 ? 900 : 2500;
+        const ctx = sources.map((s) => `<source n="${s.n}" repo="${s.repo}" path="${s.path}" lines="${s.start}-${s.end}">\n${s.text.slice(0, cap)}\n</source>`).join('\n\n');
         const history = messages.slice(-11, -1).filter((m) => m.content).map(({ role, content }) => ({ role, content: content.slice(0, 6000) }));
         while (history.length && history[0].role !== 'user') history.shift();
         const instr = (Profile.get().instructions ? `\n\nThe user's standing preferences for how you answer (never against the rules or the sources): ${Profile.get().instructions}` : '')

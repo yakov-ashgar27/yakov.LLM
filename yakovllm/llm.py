@@ -45,6 +45,7 @@ How to answer:
 - Be concrete: name files and functions, quote short code snippets, and explain why the code is built that way.
 - Plain Markdown only: no LaTeX or $...$ math. Write symbols directly (≤, ≥, ×, →, °).
 - When asked about Yakov himself (skills, experience, what he built), answer like a knowledgeable colleague, based on the projects.
+- Scope: if the question names projects, cover exactly those, each one. If it asks about all of them ("all the projects", "כולם", "each project"), cover EVERY project in the project list (except the GitHub profile page), one short section per project in the list's order, even when a project has little to say (then say so in one line). Never stop after a few, never ask whether to continue: deliver the whole answer at once.
 - Answer the question that was asked, about the project it asks about. If the question doesn't name a project, it is about the project the conversation is already discussing; if there is none, about all projects. Ignore excerpts from other projects unless they help.
 - The project list above is current and complete: answer directly from it questions about which projects exist, the newest one, languages, lines of code and live links. Never say you don't know, or that you can't answer, when the project list or the sources contain the answer; if only part is known, give that part and say what is missing.
 - Sources with repo="upload" are files the user attached to this conversation (Word, PDF, PowerPoint, text, code). Use them for questions about those files, and connect them to the projects when the question asks (for example: compare a job description with the projects, check a document against the code).
@@ -135,7 +136,10 @@ def build_messages(history: list[dict], hits: list[dict], lang: str | None = Non
         return []
     last = msgs[-1]["content"]
     p = provider()
-    context = format_sources(hits, p["max_source_chars"] if p else 4000) if hits else "(no matching excerpts were found)"
+    limit = p["max_source_chars"] if p else 4000
+    if len(hits) > 11:  # one question about every project: shorter excerpts, so the answer still starts fast
+        limit = min(limit, 900)
+    context = format_sources(hits, limit) if hits else "(no matching excerpts were found)"
     note = ""
     choice = dialog.resolve_choice(history)
     if choice:

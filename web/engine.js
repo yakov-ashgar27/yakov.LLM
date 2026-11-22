@@ -8,6 +8,9 @@
   const K1 = 1.2, B = 0.75, META_WEIGHT = 3, REPO_BOOST = 3.0, CONTEXT_BOOST = 1.8, README_BOOST = 1.15;
   const TEST_PENALTY = 0.8, MAX_PER_FILE = 2;
   const CARD_KINDS = new Set(['symbol', 'file']);
+  const PER_PROJECT = 2;
+  const ALL_PROJECTS = /כל ה?פרויקטים|כל אחד מה?פרויקטים|בכל אחד|לכל אחד|של כולם|כולם|לכולם|בכולם|בכל ה?פרויקטים|\ball (?:the |my |of the |of his |his )?(?:projects|repos|repositories)\b|\b(?:every|each) (?:project|repo)\b|\ball of them\b|\bfor each\b|\bacross (?:all )?(?:the )?projects\b/i;
+  const wantsAll = (text) => ALL_PROJECTS.test(text || '');
   const TEST_WORDS = new Set(['test', 'tests', 'pytest', 'vitest', 'בדיקה', 'בדיקות', 'e2e', 'playwright']);
 
   function makeTokenizer(cfg) {
@@ -171,8 +174,28 @@
     }
 
     // Same as Index.answer_context in search.py: stay on the project in play and pin its fact sheet.
+    projectKeys() {
+      const owner = (this.kb.owner || '').toLowerCase();
+      return this.kb.repos.filter((r) => r.key !== owner && (r.files || 0) > 1)
+        .sort((a, b) => ((b.pushed_at || b.committed_at || '') > (a.pushed_at || a.committed_at || '') ? 1 : (b.pushed_at || b.committed_at || '') < (a.pushed_at || a.committed_at || '') ? -1 : 0))
+        .map((r) => r.key);
+    }
+
+    // Same as Index.per_project_context in search.py: the best excerpts from EACH project.
+    perProjectContext(query, targets) {
+      const out = [];
+      for (const t of targets) {
+        let hits = this.search(query, { k: PER_PROJECT, repo: t });
+        const ov = `${t}:(overview):1-1`;
+        if (!hits.length && this.byId.has(ov)) hits = [{ chunk: this.byId.get(ov), score: 0, terms: [] }];
+        out.push(...hits);
+      }
+      return out;
+    }
+
     answerContext(query, { k = 8, repo = null, contextRepos = null } = {}) {
       const named = this.tok.detectRepos(query);
+      if (!repo && (wantsAll(query) || named.length > 3)) return this.perProjectContext(query, named.length > 3 ? named : this.projectKeys());
       const targets = (repo ? [repo] : (named.length ? named : (contextRepos || []))).slice(0, 3);
       let hits;
       if (targets.length) {
@@ -208,7 +231,7 @@
     }
   }
 
-  const api = { Index, makeTokenizer, isTestPath };
+  const api = { Index, makeTokenizer, isTestPath, wantsAll };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.YakovEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

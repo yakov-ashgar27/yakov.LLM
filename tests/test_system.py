@@ -427,7 +427,8 @@ def test_summary_skips_badges_and_uses_the_tagline():
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 def test_browser_answer_context_matches_python():
-    qs = ["ספר לי על DocMind", "כמה שורות קוד יש ב-GuardStream?", "מה הפרויקט הכי חדש?", "How do I run wifi doctor?"]
+    qs = ["ספר לי על DocMind", "כמה שורות קוד יש ב-GuardStream?", "מה הפרויקט הכי חדש?", "How do I run wifi doctor?",
+          "מבנה נתונים של כולם", "What tests does each project have?"]
     script = f"""
       const {{Index}} = require({json.dumps(str(ROOT / 'web' / 'engine.js'))});
       const kb = JSON.parse(require('fs').readFileSync({json.dumps(str(ROOT / 'data' / 'kb.json'))}, 'utf8'));
@@ -699,3 +700,21 @@ def test_folder_chats_answer_from_the_folder_files(app):
     # naming a project inside a folder still brings in that project
     events = _sse(url + "/api/chat", {"folder": {"name": "x", "files": 1}, "messages": [{"role": "user", "content": "How does Bomberman's enemy chase the player?"}]})
     assert any(s["repo"] == "bomberman" for s in events[0][1]["sources"])
+
+
+def test_questions_about_every_project_cover_every_project():
+    ix = Index.load(ROOT / "data" / "kb.json")
+    every = set(ix.project_keys())
+    assert len(every) >= 8
+    for q in ("מבנה נתונים של כל הפרויקטים", "מבנה נתונים של כולם", "Which database does each project use?", "all the projects: how are they tested?"):
+        assert {h.chunk["repo"] for h in ix.answer_context(q)} == every, q
+    named = ix.answer_context("השווה בין bomberman, guardstream, docmind ו-fitvision")
+    assert {h.chunk["repo"] for h in named} == {"bomberman", "guardstream", "docmind", "fitvision-ai"}
+
+
+def test_follow_up_after_an_all_projects_question_stays_on_all(app):
+    _, url = app
+    events = _sse(url + "/api/chat", {"messages": [{"role": "user", "content": "מבנה נתונים של כל הפרויקטים"},
+                                                   {"role": "assistant", "content": "..."},
+                                                   {"role": "user", "content": "ומה עם הבדיקות?"}]})
+    assert len({s["repo"] for s in events[0][1]["sources"]}) >= 8

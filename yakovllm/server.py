@@ -42,7 +42,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import dialog, extract, llm, tokenizer
 from .memory import Memory
-from .search import Index
+from .search import Index, wants_all
 from .sync import GitHubSync
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -324,6 +324,10 @@ class Handler(BaseHTTPRequestHandler):
         folder = data.get("folder") if isinstance(data.get("folder"), dict) else None
         lang = {"he": "Hebrew", "en": "English"}.get(str(data.get("lang") or ""))
         question, search_text = retrieval_query(messages)
+        # "and the tests?" right after a question about all projects is still about all projects
+        prev_users = [str(m.get("content", "")) for m in messages[:-1] if m.get("role") == "user"]
+        if prev_users and wants_all(prev_users[-1]) and not STATE.index.detect(question) and len(question.split()) < 8:
+            search_text += " כל הפרויקטים"
         if not question:
             return self._json({"error": "empty question"}, 400)
 
@@ -353,7 +357,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 hits = ix.answer_context(search_text, k=8 if not attachments else 6, repo=repo, extra_terms=keywords,
                                          context_repos=context)
-            sources = (attachments + source_payload(ix, hits))[:11]  # fewer tokens in = the answer starts sooner
+            # fewer tokens in = the answer starts sooner; a question about every project gets 2 per project
+            sources = (attachments + source_payload(ix, hits))[:11 if len(hits) <= 11 else 30]
             for n, src in enumerate(sources, 1):
                 src["n"] = n
             projects = [repo] if repo else (ix.detect(question) or context)[:3]

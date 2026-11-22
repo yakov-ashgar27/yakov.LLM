@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,15 @@ TEST_WORDS = {"test", "tests", "pytest", "vitest", "בדיקה", "בדיקות",
 MAX_PER_FILE = 2
 CARD_KINDS = {"symbol", "file"}   # fact cards about a file get their own per-file budget beside its code
 FACTS_PATH = "(project facts)"
+PER_PROJECT = 2       # excerpts per project when a question covers many projects
+# "all the projects", "of all of them", "each project": the answer must cover every project
+ALL_PROJECTS = re.compile(r"כל ה?פרויקטים|כל אחד מה?פרויקטים|בכל אחד|לכל אחד|של כולם|כולם|לכולם|בכולם|בכל ה?פרויקטים|"
+                          r"\ball (?:the |my |of the |of his |his )?(?:projects|repos|repositories)\b|\b(?:every|each) (?:project|repo)\b|"
+                          r"\ball of them\b|\bfor each\b|\bacross (?:all )?(?:the )?projects\b", re.I)
+
+
+def wants_all(text: str) -> bool:
+    return bool(ALL_PROJECTS.search(text or ""))
 
 
 @dataclass
@@ -147,6 +157,8 @@ class Index:
            what it's built with. With no project in play, pin the all-projects overview instead.
         """
         named = self.detect(query)
+        if not repo and (wants_all(query) or len(named) > 3):
+            return self.per_project_context(query, named if len(named) > 3 else self.project_keys(), extra_terms)
         targets = [repo] if repo else (named or list(context_repos or []))
         targets = targets[:3]
         if targets:
@@ -169,6 +181,24 @@ class Index:
         have = {h.chunk["id"] for h in hits}
         pinned = [Hit(self.by_id[i], 0.0, []) for i in dict.fromkeys(wanted) if i in self.by_id and i not in have]
         return pinned + hits
+
+    def project_keys(self) -> list[str]:
+        """Real projects, newest first: not the profile README, not one-file repos."""
+        owner = (self.kb.get("owner") or "").lower()
+        repos = [r for r in self.kb["repos"] if r["key"] != owner and (r.get("files") or 0) > 1]
+        repos.sort(key=lambda r: r.get("pushed_at") or r.get("committed_at") or "", reverse=True)
+        return [r["key"] for r in repos]
+
+    def per_project_context(self, query: str, targets: list[str], extra_terms: list[str] | None = None) -> list[Hit]:
+        """A question about every project ("data structures of all of them"): the best PER_PROJECT
+        excerpts from EACH project, so the answer can't cover three and forget the rest."""
+        out: list[Hit] = []
+        for t in targets:
+            hits = self.search(query, k=PER_PROJECT, repo=t, extra_terms=extra_terms)
+            if not hits and f"{t}:(overview):1-1" in self.by_id:
+                hits = [Hit(self.by_id[f"{t}:(overview):1-1"], 0.0, [])]
+            out.extend(hits)
+        return out
 
     def detect(self, text: str) -> list[str]:
         return tokenizer.detect_repos(text, self.aliases)

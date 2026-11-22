@@ -563,3 +563,5 @@ input.rename {
 .btn.small { padding: 5px 10px; font-size: 13px; }
 
 .scope[hidden] { display: none; }
+
+@media (max-width: 860px) { .temp-btn span { display: none; } .temp-btn { padding: 6px; } }
